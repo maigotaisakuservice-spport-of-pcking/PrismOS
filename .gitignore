@@ -1,0 +1,11 @@
+# ビルド成果物
+build/
+*.iso
+*.elf
+
+# エディタ・OS
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/

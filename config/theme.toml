@@ -1,0 +1,47 @@
+# PrismOS — テーマ設定ファイル
+# 将来の GUI (デスクトップ環境) が読む設定。
+# v0.1 ではシェルの `theme` コマンドがこの内容を表示する。
+# 値はすべてここで変えられる — OS を入れ直す必要はない。
+
+[theme]
+# アクセントカラー (Windows 11 のアクセント色に相当)
+accent = "#4CC2FF"
+# 壁紙ファイル名 (将来: boot/ または themes/ から読む)
+wallpaper = "prism-dusk.png"
+# 背景の明るさ: "dark" / "light"
+mode = "dark"
+# ウィンドウの角丸 (px)。0 だと角ばった Windows 10 風になる
+corner_radius = 8
+
+[taskbar]
+# 位置: "bottom" / "top" / "left" / "right"
+position = "bottom"
+# 中央寄せ (Windows 11 風) か左寄せ (Windows 10 風) か
+alignment = "center"
+# 透明度 0.0〜1.0
+opacity = 0.85
+# 時計と検索ボックスを表示するか
+show_clock = true
+show_search = true
+
+[dock]
+# Mac 風 Dock: "shown" / "hidden"
+display = "shown"
+# 位置: "bottom" / "left" / "right"
+position = "bottom"
+# マウスオーバーでアイコンが大きくなる倍率
+magnification = 1.5
+# よく使うアプリ (将来: .desktop に相当)
+apps = ["terminal", "files", "browser", "settings"]
+
+[spotlight]
+# Spotlight 風検索のショートカット (将来のキーボードドライバ用)
+shortcut = "Super+Space"
+# 検索対象: アプリ / ファイル / 設定 / 計算
+sources = ["apps", "files", "settings"]
+
+[window]
+# Mission Control 風のウィンドウ一覧のショートカット
+mission_control_shortcut = "Super+Tab"
+# ウィンドウのアニメーション: "smooth" / "instant"
+animation = "smooth"
