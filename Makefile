@@ -104,11 +104,13 @@ test: $(BUILD)/test_shell
 > ./$(BUILD)/test_shell
 
 # --- QEMU ----------------------------------------------------------------
+# sh 経由で呼ぶ: GitHub API 経由のプッシュではスクリプトの実行権限が
+# 落ちることがあるため、実行権限に依存しない。
 run: $(ISO)
-> ./scripts/run-qemu.sh
+> sh scripts/run-qemu.sh
 
 boot-test: $(ISO)
-> ./scripts/boot-test.sh
+> sh scripts/boot-test.sh
 
 # --- 掃除 ----------------------------------------------------------------
 clean:
