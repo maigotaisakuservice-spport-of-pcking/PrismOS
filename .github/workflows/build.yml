@@ -31,13 +31,13 @@ jobs:
 
       - name: Boot test in QEMU
         run: make boot-test
-              - name: Upload boot log
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-              name: boot-log
-              path: build/boot.log
-              if-no-files-found: warn
+      - name: Upload boot log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-log
+          path: build/boot.log
+          if-no-files-found: warn
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
