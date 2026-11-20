@@ -45,6 +45,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ISO = os.path.join(ROOT, "build", "prismos.iso")
 DEFAULT_LOG = os.path.join(ROOT, "build", "boot.log")
 DEFAULT_STDERR_LOG = os.path.join(ROOT, "build", "qemu-stderr.log")
+DEFAULT_DEBUG_LOG = os.path.join(ROOT, "build", "qemu-debug.log")
 
 QEMU = "qemu-system-x86_64"
 QEMU_ARGS = [
@@ -55,6 +56,13 @@ QEMU_ARGS = [
     "-monitor", "none",
     "-display", "none",
     "-no-reboot",
+    # CI (QEMU 10) で QEMU が最初のコマンド直後に exit code 0 で
+    # 終わる問題の診断用: ゲストの例外と CPU リセット (トリプルフ
+    # ォルトを含む) をログに残す。v0.1 のカーネルには IDT が無く、
+    # どんな例外もトリプルフォルト -> QEMU 終了になるため、例外が
+    # 起きているのか、ホスト側の終了なのかを切り分けるのが目的。
+    "-d", "cpu_reset,int",
+    "-D", DEFAULT_DEBUG_LOG,
 ]
 
 # (送るコマンド, その応答に含まれるはずの文字列, ラベル)
@@ -231,6 +239,18 @@ def main() -> int:
                 sys.stdout.write(f.read().decode("utf-8", "replace"))
         except OSError:
             pass
+        # QEMU のデバッグログ (-d cpu_reset,int) と stderr も出す。
+        # 空なら何も出さない (成功時は空のはず)。
+        for label, path in (("qemu debug log", DEFAULT_DEBUG_LOG),
+                            ("qemu stderr", STDERR_LOG)):
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+                if data.strip():
+                    print("--- %s (%s) ---" % (label, path))
+                    sys.stdout.write(data.decode("utf-8", "replace"))
+            except OSError:
+                pass
         print("BOOT TEST FAILED")
         return 1
     return 0
