@@ -110,7 +110,7 @@ run: $(ISO)
 > sh scripts/run-qemu.sh
 
 boot-test: $(ISO)
-> sh scripts/boot-test.sh
+> python3 scripts/boot-test.py
 
 # --- 掃除 ----------------------------------------------------------------
 clean:
