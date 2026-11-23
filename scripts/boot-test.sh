@@ -41,12 +41,12 @@ check() {
   fi
 }
 
-check "PrismOS 0.1.0"      "boot banner"
+check "PrismOS 0.2.0"      "boot banner"
 check "prismos> "          "shell prompt"
 check "PrismOS shell"      "help output"
-check "PrismOS version 0.1.0" "ver output"
+check "PrismOS version 0.2.0" "ver output"
 check "README.txt"         "ls output"
-# "Windows 11" はバナーにも出るため、about の判定には使わない
+# バナーにも出る文言は about の判定には使わない
 check "A customizable OS"  "about output"
 
 if [ "$fail" -ne 0 ]; then

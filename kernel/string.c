@@ -81,3 +81,32 @@ char *strncpy(char *dst, const char *src, size_t n) {
     }
     return dst;
 }
+
+int memcmp(const void *a, const void *b, size_t n) {
+    const uint8_t *x = (const uint8_t *)a;
+    const uint8_t *y = (const uint8_t *)b;
+    for (size_t i = 0; i < n; i++) {
+        if (x[i] != y[i]) {
+            return (int)x[i] - (int)y[i];
+        }
+    }
+    return 0;
+}
+
+char *strstr(const char *haystack, const char *needle) {
+    if (needle[0] == '\0') {
+        return (char *)haystack;
+    }
+    size_t nlen = strlen(needle);
+    for (size_t i = 0; haystack[i] != '\0'; i++) {
+        size_t j = 0;
+        while (j < nlen && haystack[i + j] != '\0' &&
+               haystack[i + j] == needle[j]) {
+            j++;
+        }
+        if (j == nlen) {
+            return (char *)(haystack + i);
+        }
+    }
+    return NULL;
+}
