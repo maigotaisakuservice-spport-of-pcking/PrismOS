@@ -1,0 +1,19 @@
+PrismOS - third-party notices
+
+This system includes work by third parties. The full
+license texts are in the "licenses" folder of this image
+and in the "licenses.txt" file inside the running system.
+
+1. Japanese font glyphs
+   Rasterized at build time from Noto Sans CJK Regular
+   (Copyright The Noto Project Authors).
+   License: SIL Open Font License 1.1
+   (licenses/OFL-1.1-Noto.txt).
+   One glyph (U+FFFD) is an original outline drawn for
+   PrismOS, and U+3000 is taken from the same font.
+
+2. Limine bootloader (version 8.3.2)
+   Copyright (C) 2019-2024 mintsuki and contributors.
+   License: BSD 2-Clause (licenses/BSD-Limine.txt).
+
+Everything else in this image is part of PrismOS itself.

@@ -3,9 +3,14 @@ build/
 *.iso
 *.elf
 
+# 更新署名用の秘密鍵 (ML-DSA-44)。絶対に上げないこと。
+# 公開鍵は shell/pq_key.h に入っている。
+scripts/pq-private-key.pem
+
 # エディタ・OS
 .DS_Store
 *.swp
 *~
 .vscode/
 .idea/
+__pycache__/
