@@ -36,6 +36,7 @@
 #include "keyboard.h"
 #include "../shell/mime.h"
 #include "mailproto.h"
+#include "net.h"
 #include "netstack.h"
 #include "persist.h"
 #include "pmm.h"

@@ -1,6 +1,7 @@
 /* PrismOS — ディスクへの永続化とインストーラ (ATA + diskfs)。 */
 #include "persist.h"
 #include "account.h"
+#include "ata.h"
 #include "block.h"
 #include "crypto.h"
 #include "diskfs.h"

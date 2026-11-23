@@ -6,6 +6,7 @@
 #include "../shell/storepkg.h"
 #include "../shell/vfs.h"
 #include "persist.h"
+#include "security.h"
 #include "serial.h"
 #include "shell.h"
 #include "string.h"
