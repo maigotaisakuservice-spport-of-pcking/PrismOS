@@ -17,16 +17,18 @@ static uint32_t pci_address(uint8_t bus, uint8_t slot, uint8_t func,
 
 uint32_t pci_config_read32(uint8_t bus, uint8_t slot, uint8_t func,
                            uint8_t offset) {
-    __asm__ volatile("outl %0, %1" : : "a"(pci_address(bus, slot, func, offset)), "Nd"(PCI_ADDR));
-    uint32_t v;
-    __asm__ volatile("inl %1, %0" : "=a"(v) : "Nd"(PCI_DATA));
-    return v;
+    /* 生の inline asm ("Nd" 制約つき outl/inl) は新しい
+     * アセンブラ (CI) が operand type mismatch で弾くため、
+     * io.h のラッパー (ポートが uint16_t で宣言され、
+     * オペランドサイズが一致する) を使う。 */
+    prism_outl(PCI_ADDR, pci_address(bus, slot, func, offset));
+    return prism_inl(PCI_DATA);
 }
 
 static void pci_config_write32(uint8_t bus, uint8_t slot, uint8_t func,
                                uint8_t offset, uint32_t value) {
-    __asm__ volatile("outl %0, %1" : : "a"(pci_address(bus, slot, func, offset)), "Nd"(PCI_ADDR));
-    __asm__ volatile("outl %0, %1" : : "a"(value), "Nd"(PCI_DATA));
+    prism_outl(PCI_ADDR, pci_address(bus, slot, func, offset));
+    prism_outl(PCI_DATA, value);
 }
 
 void pci_config_write16(uint8_t bus, uint8_t slot, uint8_t func,
