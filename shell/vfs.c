@@ -14,7 +14,9 @@
  * scripts/build-compat-guests.py が shell/sample_compat.h を作る。 */
 #include "sample_bmp.h"
 #include "sample_compat.h"
+#include "sample_macho.h"
 #include "sample_pe.h"
+#include "sample_pe2.h"
 #include "sample_driver.h"
 #include "sample_wav.h"
 #include "sample_video_pv1.h"
@@ -155,6 +157,18 @@ static const struct {
       "A customizable OS: modern centered UI, Dock and quick search,\n"
       "and a shell with two command styles.\n" },
     { "VERSION", "27H1\n" },
+    { "Hello.app/Contents/Info.plist",
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<plist version=\"1.0\">\n"
+      "<dict>\n"
+      "\t<key>CFBundleExecutable</key>\n"
+      "\t<string>Hello</string>\n"
+      "\t<key>CFBundleName</key>\n"
+      "\t<string>Hello</string>\n"
+      "\t<key>CFBundleIdentifier</key>\n"
+      "\t<string>os.prism.hello</string>\n"
+      "</dict>\n"
+      "</plist>\n" },
     { "theme.toml",
       "[theme]\n"
       "accent = \"#4CC2FF\"\n"
@@ -272,6 +286,12 @@ static const struct {
     { "gfxdemo.elf", compat_guest_gfxdemo, compat_guest_gfxdemo_len },
     { "netdemo.elf", compat_guest_netdemo, compat_guest_netdemo_len },
     { "hello-pe.exe", compat_guest_hello_pe, compat_guest_hello_pe_len },
+    { "hello2-pe.exe", compat_guest_hello_pe2,
+      compat_guest_hello_pe2_len },
+    { "hello.macho", compat_guest_hello_macho,
+      compat_guest_hello_macho_len },
+    { "Hello.app/Contents/MacOS/Hello", compat_guest_hello_macho,
+      compat_guest_hello_macho_len },
 };
 
 void vfs_set_allocator(vfs_alloc_fn alloc, vfs_free_fn free_fn) {

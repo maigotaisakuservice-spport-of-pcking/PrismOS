@@ -142,7 +142,7 @@ int main(void) {
     uint8_t sb[DISKFS_SECTOR_SIZE];
     CHECK(vdisk_read(NULL, 1, sb) == 0);
     CHECK(bytes_eq(sb, (const uint8_t *)"PRISMFS2", 8));
-    /* 版4 で書かれる: 版番号 4、データ開始 20。 */
+    /* 版5 で書かれる: 版番号 5、データ開始 20。 */
     {
         uint32_t ver = (uint32_t)sb[8] | ((uint32_t)sb[9] << 8) |
                        ((uint32_t)sb[10] << 16) |
@@ -150,7 +150,7 @@ int main(void) {
         uint32_t dsec = (uint32_t)sb[16] | ((uint32_t)sb[17] << 8) |
                         ((uint32_t)sb[18] << 16) |
                         ((uint32_t)sb[19] << 24);
-        CHECK(ver == 4);
+        CHECK(ver == 5);
         CHECK(dsec == 20);
     }
 
@@ -168,7 +168,7 @@ int main(void) {
     CHECK(count == 1);
     CHECK(strcmp(entries[0].name, "note.txt") == 0);
     CHECK(entries[0].size == strlen(hello));
-    uint8_t buf[DISKFS_MAX_FILE_SIZE];
+    static uint8_t buf[DISKFS_MAX_FILE_SIZE];
     size_t len = 0;
     CHECK(diskfs_read_file(&dev, "note.txt", buf, sizeof(buf), &len) == 0);
     CHECK(len == strlen(hello));
@@ -256,7 +256,7 @@ int main(void) {
     CHECK(count == 1);
 
     /* 規則違反: 大きすぎる・名前が不正。 */
-    uint8_t big[DISKFS_MAX_FILE_SIZE + 1];
+    static uint8_t big[DISKFS_MAX_FILE_SIZE + 1];
     for (size_t i = 0; i < sizeof(big); i++) {
         big[i] = 'x';
     }

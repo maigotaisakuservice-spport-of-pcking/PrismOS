@@ -191,17 +191,18 @@ int main(void) {
     run(&st, "rm", out, sizeof(out));
     CHECK_CONTAINS(out, "usage:");
 
-    /* VFS の上限: 128 件まで。組み込み 51 件 + 77 件で満杯に
-     * なり、78 件目は失敗する。内容 16384 バイト超も失敗する。 */
+    /* VFS の上限: 128 件まで。組み込みファイルの件数は
+     * 増えることがあるため、空きを数えてから満杯にする。 */
     {
+        int room = 128 - vfs_file_count();
         char name[16];
-        for (int i = 0; i < 77; i++) {
+        for (int i = 0; i < room; i++) {
             snprintf(name, sizeof(name), "f%d.txt", i);
             CHECK(vfs_write(name, "x", 1) == 0);
         }
         CHECK(vfs_file_count() == 128);
         CHECK(vfs_write("one-more.txt", "x", 1) == -2);
-        static char big[17000];
+        static char big[PRISM_VFS_MAX_FILE_SIZE + 1];
         memset(big, 'y', sizeof(big));
         CHECK(vfs_write("README.txt", big, sizeof(big)) == -1);
         CHECK(vfs_file_count() == 128);
@@ -223,8 +224,8 @@ int main(void) {
         vfs_set_allocator(NULL, NULL);
         CHECK(vfs_write("x.txt", "x", 1) == -4);
         vfs_set_allocator(malloc, free);
-        prism_shell_init(&st); /* 組み込み 51 件に戻す */
-        CHECK(vfs_file_count() == 51);
+        prism_shell_init(&st); /* 組み込みファイルの件数に戻す */
+        CHECK(vfs_file_count() == 128 - room);
     }
 
     /* clear / cls はフラグだけ立てて出力を出さない */

@@ -93,9 +93,13 @@ static uint32_t sec(diskfs_dev *dev, uint32_t rel) {
  *      開始 2058、スロット 2057 セクタ。
  * 版3: 128 件、表 16 セクタ、データ開始 18、スナップショット
  *      開始 4114、スロット 4113 セクタ。
- * 1 ファイルのセクタ数 (32 = 16384 バイト) は両版共通。
- * 配置はスーパーブロックの版とデータ開始セクタから決める。
- * 版2 のディスクはそのまま読み書きできる。 */
+ * 版4: 128 件、表 16 セクタ、メタ 2 セクタ、データ開始 20、
+ *      スナップショット開始 4116、スロット 4115 セクタ。
+ * 版5: 版4 と同じ配置に、大きなファイル領域 (開始 20576)
+ *      を足したもの。1 ファイルのセクタ数 (32 = 16384 バイト)
+ *      は版2/3/4/5 の固定枠で共通。配置はスーパーブロックの
+ *      版とデータ開始セクタから決める。版2/3/4 のディスクは
+ *      そのまま読み書きできる。 */
 typedef struct {
     int max_files;
     uint32_t table_sectors;
@@ -105,13 +109,30 @@ typedef struct {
     /* 版4のみ: メタ領域 (作成/更新時刻) の開始セクタ。
      * 0 = 無し (版2/3)。 */
     uint32_t meta_sector;
+    /* 版5のみ: 大きなファイル領域の開始セクタ (相対)。
+     * 0 = 無し (版2/3/4)。大きさは total_sectors から決まる。 */
+    uint32_t big_sector;
 } diskfs_layout;
 
-static const diskfs_layout LAYOUT_V2 = { 64, 8, 10, 2058, 2057, 0 };
-static const diskfs_layout LAYOUT_V3 = { 128, 16, 18, 4114, 4113, 0 };
+static const diskfs_layout LAYOUT_V2 = { 64, 8, 10, 2058, 2057, 0, 0 };
+static const diskfs_layout LAYOUT_V3 = { 128, 16, 18, 4114, 4113, 0, 0 };
 /* 版4: 表 16 セクタ (2-17)、メタ 2 セクタ (18-19、
  * 128 件 x 8 バイト)、データは 20 から。 */
-static const diskfs_layout LAYOUT_V4 = { 128, 16, 20, 4116, 4115, 18 };
+static const diskfs_layout LAYOUT_V4 = { 128, 16, 20, 4116, 4115, 18, 0 };
+/* 版5: 版4 と同じ配置 + 大きなファイル領域 (20576〜)。 */
+static const diskfs_layout LAYOUT_V5 = {
+    128, 16, 20, 4116, 4115, 18, DISKFS_BIG_SECTOR
+};
+
+/* 大きなファイル領域の大きさ (セクタ数)。領域が無ければ 0。 */
+static uint32_t big_area_sectors(diskfs_dev *dev,
+                                 const diskfs_layout *lay) {
+    if (lay->big_sector == 0 ||
+        dev->total_sectors <= lay->big_sector) {
+        return 0;
+    }
+    return dev->total_sectors - lay->big_sector;
+}
 
 static int layout_of(diskfs_dev *dev, diskfs_layout *out) {
     uint8_t sector[DISKFS_SECTOR_SIZE];
@@ -140,6 +161,11 @@ static int layout_of(diskfs_dev *dev, diskfs_layout *out) {
     if (rd32(sector + 8) == 4 &&
         rd32(sector + 16) == LAYOUT_V4.data_sector) {
         *out = LAYOUT_V4;
+        return 0;
+    }
+    if (rd32(sector + 8) == 5 &&
+        rd32(sector + 16) == LAYOUT_V5.data_sector) {
+        *out = LAYOUT_V5;
         return 0;
     }
     return -1;
@@ -212,6 +238,12 @@ static void meta_set(int slot, uint32_t ctime, uint32_t mtime) {
 static int snap_entry_valid(diskfs_dev *dev, const diskfs_entry *e,
                             const diskfs_layout *lay);
 
+/* Defined with the snapshot code below; diskfs_write_file
+ * uses it to place big files. */
+static uint32_t big_alloc(diskfs_dev *dev, const diskfs_layout *lay,
+                          const uint8_t *table, uint32_t sectors,
+                          int exclude_slot);
+
 
 /* ファイル表 (4096 バイト) を読む。 */
 static int read_table(diskfs_dev *dev, uint8_t *table,
@@ -263,7 +295,8 @@ uint32_t diskfs_find_data_partition(const uint8_t *mbr, uint32_t *out_size) {
 
 /* 表の i 番目の項目を読む。used が 0 なら空き。
  * 項目の配置 (64 バイト): 名前 0-31、大きさ 32-35、
- * 開始セクタ 36-39、使用中 40、暗号化 41、IV 44-59。 */
+ * 開始セクタ 36-39、使用中 40、暗号化 41、大きなファイル
+ * 42、IV 44-59。+42 は版5 で使う (旧版は読まない)。 */
 static void entry_from(const uint8_t *table, int i, diskfs_entry *e) {
     const uint8_t *p = table + i * 64;
     size_t n = 0;
@@ -276,6 +309,7 @@ static void entry_from(const uint8_t *table, int i, diskfs_entry *e) {
     e->start_sector = rd32(p + 36);
     e->used = p[40] != 0;
     e->encrypted = p[41] != 0;
+    e->big = p[42] != 0;
     for (int j = 0; j < 16; j++) {
         e->iv[j] = p[44 + j];
     }
@@ -298,6 +332,7 @@ static void entry_to(uint8_t *table, int i, const diskfs_entry *e) {
     wr32(p + 36, e->start_sector);
     p[40] = e->used ? 1 : 0;
     p[41] = e->encrypted ? 1 : 0;
+    p[42] = e->big ? 1 : 0;
     for (int j = 0; j < 16; j++) {
         p[44 + j] = e->iv[j];
     }
@@ -310,8 +345,8 @@ int diskfs_format(diskfs_dev *dev) {
         return -1;
     }
     if (dev->total_sectors <
-        LAYOUT_V4.data_sector +
-            (uint32_t)LAYOUT_V4.max_files * DISKFS_SECTORS_PER_FILE) {
+        LAYOUT_V5.data_sector +
+            (uint32_t)LAYOUT_V5.max_files * DISKFS_SECTORS_PER_FILE) {
         return -1;
     }
     uint8_t sector[DISKFS_SECTOR_SIZE];
@@ -347,9 +382,9 @@ int diskfs_format(diskfs_dev *dev) {
     for (int i = 0; i < 8; i++) {
         sector[i] = (uint8_t)DISKFS_MAGIC[i];
     }
-    wr32(sector + 8, 4); /* 版 (新規は版4で書く) */
+    wr32(sector + 8, 5); /* 版 (新規は版5で書く) */
     wr32(sector + 12, 0); /* ファイル数 */
-    wr32(sector + 16, LAYOUT_V4.data_sector);
+    wr32(sector + 16, LAYOUT_V5.data_sector);
     wr32(sector + 20, DISKFS_SECTORS_PER_FILE);
     wr32(sector + 24, dev->total_sectors);
     if (dev->write_sector(dev->ctx, sec(dev, DISKFS_SB_SECTOR), sector) !=
@@ -358,18 +393,61 @@ int diskfs_format(diskfs_dev *dev) {
     }
     /* 空のファイル表。 */
     uint8_t *table = table_scratch;
-    for (size_t i = 0; i < LAYOUT_V4.table_sectors * DISKFS_SECTOR_SIZE;
+    for (size_t i = 0; i < LAYOUT_V5.table_sectors * DISKFS_SECTOR_SIZE;
          i++) {
         table[i] = 0;
     }
-    if (write_table(dev, table, &LAYOUT_V4) != 0) {
+    if (write_table(dev, table, &LAYOUT_V5) != 0) {
         return -1;
     }
-    /* 空のメタ領域 (版4)。 */
+    /* 空のメタ領域 (版4/5)。 */
     for (size_t i = 0; i < sizeof(meta_scratch); i++) {
         meta_scratch[i] = 0;
     }
-    if (meta_flush(dev, &LAYOUT_V4) != 0) {
+    if (meta_flush(dev, &LAYOUT_V5) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+/* 版4 のディスクを版5 へ移行する。版番号だけを変える。
+ * 版4 と版5 は表・メタ・データ・復元ポイントの配置が同じ
+ * なので、データの移動は要らない。 */
+int diskfs_migrate_to_v5(diskfs_dev *dev) {
+    if (dev == NULL || dev->read_sector == NULL ||
+        dev->write_sector == NULL) {
+        return -1;
+    }
+    uint8_t sector[DISKFS_SECTOR_SIZE];
+    if (dev->read_sector(dev->ctx, sec(dev, DISKFS_SB_SECTOR), sector) !=
+        0) {
+        return -1;
+    }
+    for (int i = 0; i < 8; i++) {
+        if (sector[i] != (uint8_t)DISKFS_MAGIC[i]) {
+            return -1;
+        }
+    }
+    if (rd32(sector + 8) != 4 ||
+        rd32(sector + 16) != LAYOUT_V4.data_sector) {
+        return -2;
+    }
+    /* 表の整合性を確認してから版番号だけを変える。 */
+    diskfs_layout lay = LAYOUT_V4;
+    uint8_t *table = table_scratch;
+    if (read_table(dev, table, &lay) != 0) {
+        return -1;
+    }
+    for (int i = 0; i < lay.max_files; i++) {
+        diskfs_entry e;
+        entry_from(table, i, &e);
+        if (!snap_entry_valid(dev, &e, &lay)) {
+            return -3;
+        }
+    }
+    wr32(sector + 8, 5);
+    if (dev->write_sector(dev->ctx, sec(dev, DISKFS_SB_SECTOR),
+                          sector) != 0) {
         return -1;
     }
     return 0;
@@ -557,8 +635,26 @@ int diskfs_write_file(diskfs_dev *dev, const char *name,
             return -2;
         }
     }
-    uint32_t start = sec(dev, lay.data_sector) +
-                     (uint32_t)slot * DISKFS_SECTORS_PER_FILE;
+    /* 16KB を超えるファイルは版5 の大きなファイル領域へ。
+     * 旧版のディスク (大きなファイル領域が無い) には書けない。 */
+    int is_big = len > DISKFS_SMALL_FILE_SIZE;
+    uint32_t start = 0;
+    if (!is_big) {
+        start = sec(dev, lay.data_sector) +
+                (uint32_t)slot * DISKFS_SECTORS_PER_FILE;
+    } else {
+        if (lay.big_sector == 0) {
+            return -1;
+        }
+        uint32_t sectors =
+            (uint32_t)((len + DISKFS_SECTOR_SIZE - 1) /
+                       DISKFS_SECTOR_SIZE);
+        start = big_alloc(dev, &lay, table, sectors,
+                          existed ? slot : -1);
+        if (start == 0) {
+            return -1;
+        }
+    }
     /* 暗号化が有効なら、ここで暗号文に変える。IV はファイルごとに
      * 新しく作り、表に置く。 */
     uint8_t *enc_buf = enc_scratch;
@@ -607,6 +703,7 @@ int diskfs_write_file(diskfs_dev *dev, const char *name,
     e.size = (uint32_t)len;
     e.start_sector = start;
     e.used = 1;
+    e.big = is_big;
     e.encrypted = encrypted;
     for (int j = 0; j < 16; j++) {
         e.iv[j] = iv[j];
@@ -671,6 +768,7 @@ int diskfs_delete_file(diskfs_dev *dev, const char *name) {
             empty.size = 0;
             empty.start_sector = 0;
             empty.used = 0;
+            empty.big = 0;
             empty.encrypted = 0;
             empty.checksum = 0;
             empty.ctime = 0;
@@ -760,18 +858,40 @@ static int snap_read_header(diskfs_dev *dev, int slot,
  * the create path and the plain read path now check the
  * same thing, so a damaged table cannot make any of them
  * read or write outside the data region (the unsigned
- * subtraction start_sector - data_start underflowed). */
+ * subtraction start_sector - data_start underflowed).
+ * 版5 の大きなファイルは大きなファイル領域の中にあり、
+ * 固定枠の整列は要らない。 */
 static int snap_entry_valid(diskfs_dev *dev, const diskfs_entry *e,
                             const diskfs_layout *lay) {
     if (!e->used) {
         return 1;
     }
+    if (e->size > DISKFS_MAX_FILE_SIZE) {
+        return 0;
+    }
+    uint32_t sectors =
+        (e->size + DISKFS_SECTOR_SIZE - 1) / DISKFS_SECTOR_SIZE;
+    if (e->big) {
+        uint32_t big_sectors = big_area_sectors(dev, lay);
+        if (big_sectors == 0) {
+            return 0;
+        }
+        uint32_t big_start = sec(dev, lay->big_sector);
+        if (e->start_sector < big_start ||
+            e->start_sector >= big_start + big_sectors) {
+            return 0;
+        }
+        if (e->start_sector - big_start + sectors > big_sectors) {
+            return 0;
+        }
+        return 1;
+    }
+    if (e->size > DISKFS_SMALL_FILE_SIZE) {
+        return 0;
+    }
     if (e->start_sector < sec(dev, lay->data_sector) ||
         e->start_sector >=
             sec(dev, lay->data_sector + SNAP_DATA_SECTORS(lay))) {
-        return 0;
-    }
-    if (e->size > DISKFS_MAX_FILE_SIZE) {
         return 0;
     }
     /* 終端と整列: データ領域は (ファイル枠 × 32 セクタ) の
@@ -779,8 +899,6 @@ static int snap_entry_valid(diskfs_dev *dev, const diskfs_entry *e,
      * 終端や、枠の途中から始まるエントリは壊れている。 */
     {
         uint32_t off = e->start_sector - sec(dev, lay->data_sector);
-        uint32_t sectors =
-            (e->size + DISKFS_SECTOR_SIZE - 1) / DISKFS_SECTOR_SIZE;
         if ((off % DISKFS_SECTORS_PER_FILE) != 0) {
             return 0;
         }
@@ -789,6 +907,68 @@ static int snap_entry_valid(diskfs_dev *dev, const diskfs_entry *e,
         }
     }
     return 1;
+}
+
+/* 大きなファイル領域の空きを探す (first-fit)。table は
+ * 現在のファイル表。exclude_slot は上書き中の自分の項目
+ * (その古い領域は空きとして扱う。-1 = 無し)。
+ * 見つかれば書き込み先の絶対セクタ、無ければ 0 を返す。 */
+static uint32_t big_alloc(diskfs_dev *dev, const diskfs_layout *lay,
+                          const uint8_t *table, uint32_t sectors,
+                          int exclude_slot) {
+    uint32_t area = big_area_sectors(dev, lay);
+    if (area < sectors) {
+        return 0;
+    }
+    /* 使用中の大きなファイルの区間を集め、開始順に並べる。 */
+    uint32_t starts[DISKFS_MAX_FILES];
+    uint32_t ends[DISKFS_MAX_FILES];
+    int n = 0;
+    uint32_t big_start = sec(dev, lay->big_sector);
+    for (int i = 0; i < lay->max_files; i++) {
+        if (i == exclude_slot) {
+            continue;
+        }
+        diskfs_entry e;
+        entry_from(table, i, &e);
+        if (!e.used || !e.big || e.size == 0) {
+            continue;
+        }
+        uint32_t s = e.start_sector - big_start;
+        uint32_t cnt =
+            (e.size + DISKFS_SECTOR_SIZE - 1) / DISKFS_SECTOR_SIZE;
+        if (s >= area || s + cnt > area) {
+            continue; /* 壊れた項目は無視 (検証は別途行う) */
+        }
+        starts[n] = s;
+        ends[n] = s + cnt;
+        n++;
+    }
+    /* 挿入ソート (最大 128 件)。 */
+    for (int i = 1; i < n; i++) {
+        uint32_t s = starts[i], en = ends[i];
+        int j = i - 1;
+        while (j >= 0 && starts[j] > s) {
+            starts[j + 1] = starts[j];
+            ends[j + 1] = ends[j];
+            j--;
+        }
+        starts[j + 1] = s;
+        ends[j + 1] = en;
+    }
+    uint32_t cur = 0;
+    for (int i = 0; i < n; i++) {
+        if (starts[i] >= cur + sectors) {
+            return big_start + cur;
+        }
+        if (ends[i] > cur) {
+            cur = ends[i];
+        }
+    }
+    if (cur + sectors <= area) {
+        return big_start + cur;
+    }
+    return 0;
 }
 
 /* FNV-1a over the snapshot's stored table and file data,
@@ -811,7 +991,7 @@ static int snap_checksum(diskfs_dev *dev, int slot,
     for (int i = 0; i < lay->max_files; i++) {
         diskfs_entry e;
         entry_from(table, i, &e);
-        if (!e.used || e.size == 0) {
+        if (!e.used || e.size == 0 || e.big) {
             continue;
         }
         uint32_t sectors =
@@ -941,14 +1121,15 @@ int diskfs_snapshot_create(diskfs_dev *dev, const char *name,
      * 全体 (64 ファイル x 32 セクタ = 2048 セクタ) を丸ごと
      * 写すと遅いため。使っていない枠は古い内容のままでよい:
      * 復元は表にあるファイルの分だけ読み戻すので、古い内容は
-     * 決して読まれない。 */
+     * 決して読まれない。大きなファイル (版5) は写さない:
+     * データは大きなファイル領域に残り、復元しても消えない。 */
     uint8_t buf[DISKFS_SECTOR_SIZE];
     uint32_t data_start = sec(dev, lay.data_sector);
     uint32_t slot_data = base + 1 + lay.table_sectors;
     for (int i = 0; i < lay.max_files; i++) {
         diskfs_entry e;
         entry_from(table, i, &e);
-        if (!e.used || e.size == 0) {
+        if (!e.used || e.size == 0 || e.big) {
             continue;
         }
         uint32_t sectors =
@@ -1027,7 +1208,16 @@ int diskfs_snapshot_restore(diskfs_dev *dev, const char *name) {
         return -1;
     }
     uint32_t base = snap_slot_base(dev, slot, &lay);
-    /* ファイル表のコピーを読んで、ライブの表に書き戻す。 */
+    /* 復元前に現在の表を退避する。復元ポイントは大きな
+     * ファイルを含まないため、大きなファイルは今のまま残す
+     * (表の項目もデータも復元しない)。スナップショット時点の
+     * 表をそのまま書き戻すと、大きなファイルのチェックサム
+     * だけが古くなり、現内容が読めなくなってしまう。 */
+    uint8_t *live_table = list_table_scratch;
+    if (read_table(dev, live_table, &lay) != 0) {
+        return -2;
+    }
+    /* ファイル表のコピーを読む。 */
     uint8_t *table = table_scratch;
     for (uint32_t i = 0; i < lay.table_sectors; i++) {
         if (dev->read_sector(dev->ctx, base + 1 + i,
@@ -1036,7 +1226,6 @@ int diskfs_snapshot_restore(diskfs_dev *dev, const char *name) {
         }
     }
     /* 表の整合性: 使われている項目の開始セクタがデータ領域内か。 */
-    int count = 0;
     for (int i = 0; i < lay.max_files; i++) {
         diskfs_entry e;
         entry_from(table, i, &e);
@@ -1046,7 +1235,6 @@ int diskfs_snapshot_restore(diskfs_dev *dev, const char *name) {
         if (!snap_entry_valid(dev, &e, &lay)) {
             return -2;
         }
-        count++;
     }
     /* 版2 はチェックサムを照合する。一致しなければ、
      * 書きかけ・破損したスナップショットとして復元しない。
@@ -1065,16 +1253,97 @@ int diskfs_snapshot_restore(diskfs_dev *dev, const char *name) {
             }
         }
     }
+    /* 現在の大きなファイルの項目を、復元する表へ戻す。
+     * 同じ名前があればその場で上書きし、無ければ空き枠へ
+     * 入れる。空き枠が無ければそのファイルは表から落ちる
+     * (データは大きなファイル領域に残る)。 */
+    for (int i = 0; i < lay.max_files; i++) {
+        diskfs_entry live;
+        entry_from(live_table, i, &live);
+        if (!live.used || !live.big) {
+            continue;
+        }
+        int at = -1;
+        for (int j = 0; j < lay.max_files; j++) {
+            diskfs_entry cur;
+            entry_from(table, j, &cur);
+            if (cur.used && name_eq(cur.name, live.name)) {
+                at = j;
+                break;
+            }
+        }
+        if (at < 0) {
+            for (int j = 0; j < lay.max_files; j++) {
+                diskfs_entry cur;
+                entry_from(table, j, &cur);
+                if (!cur.used) {
+                    at = j;
+                    break;
+                }
+            }
+        }
+        if (at < 0) {
+            continue; /* 空き枠が無い: その大きなファイルは落ちる */
+        }
+        for (int k = 0; k < 64; k++) {
+            table[at * 64 + k] = live_table[i * 64 + k];
+        }
+    }
+    /* 合併後の表を検証し、件数を数え直す。 */
+    int count = 0;
+    for (int i = 0; i < lay.max_files; i++) {
+        diskfs_entry e;
+        entry_from(table, i, &e);
+        if (!e.used) {
+            continue;
+        }
+        if (!snap_entry_valid(dev, &e, &lay)) {
+            return -2;
+        }
+        count++;
+    }
     if (write_table(dev, table, &lay) != 0) {
         return -2;
     }
-    /* 版4: スナップショットはメタ領域を含まないので、復元後は
-     * 時刻を「不明 (0)」に落とす (古い時刻が残って誤解を
-     * 招かないように)。チェックサムは表に含まれるので
-     * そのまま検証できる。 */
-    if (lay.meta_sector != 0) {
+    /* 版4/5: スナップショットはメタ領域を含まないので、復元後は
+     * 小さなファイルの時刻を「不明 (0)」に落とす (古い時刻が
+     * 残って誤解を招かないように)。大きなファイルの時刻は
+     * 今のものを残す (表と一緒に復元しないため)。 */
+    if (lay.meta_sector != 0 && meta_load(dev, &lay) == 0) {
+        /* 大きなファイルの時刻を退避してから全て 0 にし、
+         * 大きなファイルの分だけ戻す。 */
+        static uint32_t keep_ct[DISKFS_MAX_FILES];
+        static uint32_t keep_mt[DISKFS_MAX_FILES];
+        static int keep_big[DISKFS_MAX_FILES];
+        for (int j = 0; j < lay.max_files; j++) {
+            keep_big[j] = 0;
+            keep_ct[j] = 0;
+            keep_mt[j] = 0;
+            diskfs_entry cur;
+            entry_from(table, j, &cur);
+            if (!cur.used || !cur.big) {
+                continue;
+            }
+            for (int i = 0; i < lay.max_files; i++) {
+                diskfs_entry live;
+                entry_from(live_table, i, &live);
+                if (live.used && name_eq(live.name, cur.name)) {
+                    uint32_t ct = 0, mt = 0;
+                    meta_get(i, &ct, &mt);
+                    keep_big[j] = 1;
+                    keep_ct[j] = ct;
+                    keep_mt[j] = mt;
+                    break;
+                }
+            }
+        }
         for (size_t i = 0; i < sizeof(meta_scratch); i++) {
             meta_scratch[i] = 0;
+        }
+        for (int j = 0; j < lay.max_files; j++) {
+            if (keep_big[j]) {
+                meta_set(j, keep_ct[j], keep_mt[j]);
+            }
         }
         (void)meta_flush(dev, &lay);
     }
@@ -1086,7 +1355,7 @@ int diskfs_snapshot_restore(diskfs_dev *dev, const char *name) {
     for (int i = 0; i < lay.max_files; i++) {
         diskfs_entry e;
         entry_from(table, i, &e);
-        if (!e.used || e.size == 0) {
+        if (!e.used || e.size == 0 || e.big) {
             continue;
         }
         uint32_t sectors =

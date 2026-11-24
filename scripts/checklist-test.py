@@ -830,9 +830,18 @@ def item13_all_limits_resolved():
           "PE (exe) ローダ + コンソール系 Win32 サブセット "
           "(compat-test の PE フェーズ合格)",
           "PE ローダ (compat-test の PE フェーズが通らない)")
+    # Mach-O 64bit ローダ + .app バンドル: compat-test の
+    # Mach-O フェーズ (hello.macho / Hello.app、終了コード
+    # 42) で実測。.dmg は実行形式ではないため対象外。
+    probe(ok and os.path.exists(os.path.join(ROOT, "shell/macho.c"))
+          and _src_has("shell/macho.c", "MACHO_MAGIC_64"),
+          "Mach-O 64bit ローダ + .app バンドル "
+          "(compat-test の Mach-O フェーズ合格)",
+          "Mach-O ローダ (compat-test の Mach-O フェーズが"
+          "通らない)")
     remaining.append(
-        "互換レイヤー: .app / .dmg (Mach-O) は未対応。PE は"
-        "コンソール系サブセットのみ (GUI 系は 27H2 で拡張)")
+        "PE の GUI 系は 27H2 で拡張 (製品版はコンソール系"
+        "サブセットのみ)")
 
     # 指紋・顔 (ソフトウェア側): bio-test で実測。
     ok, _rc, _o = run_make("bio-test")
@@ -930,14 +939,37 @@ def item13_all_limits_resolved():
     remaining.append(
         "Wi-Fi / Bluetooth ドライバは未実装 (実機必須のため"
         "仕様のみ。項目 3)")
-    remaining.append(
-        "スクリーンショットは 144×90 へ縮小して保存される "
-        "(VFS / diskfs の最大ファイルサイズ 16384 バイトが"
-        "上限。原寸保存にはファイルシステム形式の改訂が必要)")
+    # スクリーンショット原寸保存: diskfs 版5 のホストテスト
+    # (test_diskfs: 3MB 級 BMP の往復・版4 からの移行・復元)
+    # と、QEMU で実際に撮って原寸 BMP かを確かめる
+    # screenshot-test の両方で確認する。
+    ok, _rc, _o = run_make("diskfs-test")
+    ok_s, _rc, _o = run_make("screenshot-test")
+    probe(ok and ok_s and _src_has("kernel/desktop.c",
+                                   "SHOT_MAX_W 1280"),
+          "スクリーンショット原寸保存 (1280x800 24 ビット BMP、"
+          "diskfs-test + screenshot-test 合格)",
+          "スクリーンショット原寸保存 (diskfs-test / "
+          "screenshot-test が通らない)")
+    # ボイスレコーダの DMA 採取: 採取ロジック (BDL・目標・
+    # 取得量・ピーク) は test_hda_cap で、ADC 設定から DMA
+    # 設定・LPIB ポーリングまでの到達点は hda-record-test
+    # で確認する。実サンプルが届く DMA 完了そのものは
+    # QEMU の音声バックエンドが採取を進めないため未観測
+    # のまま残す。
+    ok, _rc, _o = run_make("hda-cap-test")
+    ok_r, _rc, _o = run_make("hda-record-test")
+    probe(ok and ok_r,
+          "録音の採取ロジック (BDL・目標・取得量・ピーク) と "
+          "ADC 設定・DMA 設定・LPIB ポーリングまでの到達点 "
+          "(hda-cap-test + hda-record-test 合格)",
+          "録音の採取ロジック (hda-cap-test / hda-record-test "
+          "が通らない)")
     remaining.append(
         "ボイスレコーダの DMA 採取完了は現環境では未観測 "
         "(音声バックエンドがゲスト採取をクロックしないため。"
-        "録音ドライバと ADC 設定の読み戻しは確認済み)")
+        "none / SDL ダミーの両方で LPIB が 0 のまま。実サン"
+        "プル到達は実バックエンドか実機が必要)")
     remaining.append(
         "複数モニタは QEMU で検証不能 (Limine の 2 面目を"
         "登録するミラー実装はあるが、QEMU の GOP が画面を"

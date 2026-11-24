@@ -173,9 +173,10 @@ def main():
         for name in ("hello.elf", "calc.elf", "cat.elf", "unsup.elf",
                      "evil.elf", "loop.elf", "maindyn.elf", "cp.elf",
                      "wc.elf", "gfxdemo.elf", "netdemo.elf",
-                     "hello-pe.exe"):
+                     "hello-pe.exe", "hello2-pe.exe", "hello.macho",
+                     "Hello.app"):
             b.wait_for(name, 20, "compat list shows %s" % name)
-        print("ok: compat list shows the 12 guest apps")
+        print("ok: compat list shows the 15 guest apps")
         b.wait_for("prismos> ", 20, "shell prompt")
 
         b.send("compat calls")
@@ -414,6 +415,49 @@ def main():
         b.wait_for("compat: hello-pe.exe exited with code 7.", 20,
                    "PE guest exit code 7")
         print("ok: run hello-pe.exe (PE loader + Win32 subset)")
+        b.wait_for("prismos> ", 20, "shell prompt")
+
+        # --- PE ゲスト第 2 弾 (hello2-pe.exe) ---
+        # 拡大した KERNEL32 サブセット (モジュール名 / 時刻 /
+        # 環境変数 / 検索 / ファイル属性など) を使い、終了
+        # コード 11 で終わる。失敗時は 21 以降の終了コード。
+        b.send("run hello2-pe.exe")
+        b.wait_for("hello2-pe.exe", 20, "PE2 module name printed")
+        for line in ("ver ok", "time ok", "env ok", "cwd ok",
+                     "name ok", "sysinfo ok", "disk ok", "find ok",
+                     "fmt ok", "W2", "str ok", "file ok"):
+            b.wait_for(line, 20, "PE2 check: %s" % line)
+        b.wait_for("compat: hello2-pe.exe exited with code 11.", 20,
+                   "PE2 guest exit code 11")
+        print("ok: run hello2-pe.exe (widened Win32 subset)")
+        b.wait_for("prismos> ", 20, "shell prompt")
+
+        # --- Mach-O ゲスト (hello.macho) ---
+        # LC_MAIN の入口から走り、あいさつを出して終了コード
+        # 42 で終わる。
+        b.send("compat info hello.macho")
+        b.wait_for("Mach-O 64-bit x86-64, type EXECUTE, entry 0x100000000",
+                   20, "compat info macho header")
+        b.wait_for("segments: 1", 20, "compat info macho segments")
+        print("ok: compat info hello.macho")
+        b.wait_for("prismos> ", 20, "shell prompt")
+
+        b.send("run hello.macho")
+        b.wait_for("Hello from Mach-O guest!", 20,
+                   "Mach-O guest greeting")
+        b.wait_for("compat: hello.macho exited with code 42.", 20,
+                   "Mach-O guest exit code 42")
+        print("ok: run hello.macho (Mach-O loader)")
+        b.wait_for("prismos> ", 20, "shell prompt")
+
+        # --- .app バンドル (Hello.app) ---
+        # バンドル内の Contents/MacOS/Hello を探して走らせる。
+        b.send("run Hello.app")
+        b.wait_for("Hello from Mach-O guest!", 20,
+                   ".app guest greeting")
+        b.wait_for("compat: Hello.app exited with code 42.",
+                   20, ".app guest exit code 42")
+        print("ok: run Hello.app (.app bundle)")
         b.wait_for("prismos> ", 20, "shell prompt")
 
         # --- 細工 ELF の回帰 (サンドボックスの穴埋め) ---

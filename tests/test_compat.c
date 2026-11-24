@@ -376,7 +376,7 @@ int main(void) {
     /* ---- イメージの載せ降ろし ---- */
     vfs_set_allocator(malloc, free);
     vfs_init();
-    check(vfs_file_count() == 51, "51 built-in files");
+    check(vfs_file_count() == 55, "55 built-in files");
     compat_image img;
     check(compat_elf_parse(compat_guest_cat, compat_guest_cat_len,
                            &info) == 0,

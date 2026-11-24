@@ -5,8 +5,10 @@
  *     カーネル側では kmalloc/kfree (PMM の上に載るヒープ) を
  *     渡し、ファイルが本当にメモリ管理の上に載る。固定の
  *     内容プールは使わない。ファイル数の上限 (128 件) と
- *     1 ファイルの上限 (16384 バイト) は、inode 数の上限と
+ *     1 ファイルの上限 (4MB) は、inode 数の上限と
  *     同じ意味の設計上の上限で、仕様として明記する。
+ *     アプリの作業バッファ (メモ帳の文章など) は
+ *     従来通り 16KB まで (PRISM_VFS_MAX_APP_FILE_SIZE)。
  *   * ファイル名・大きさ・使用中かどうかの表 (128 件分) だけは
  *     静的な表に置く。これは inode 表に相当する。
  *   * ディスク書き込み (永続化) は shell/diskfs.c と
@@ -28,7 +30,12 @@
 #include <stddef.h>
 
 #define PRISM_VFS_MAX_FILES 128
-#define PRISM_VFS_MAX_FILE_SIZE 16384
+/* 1 ファイルの上限。版5 のディスクと合わせ 4MB まで
+ * (1280x800x3 の BMP 原寸 3072054 バイトを含む)。 */
+#define PRISM_VFS_MAX_FILE_SIZE 4194304
+/* アプリの作業バッファ (メモ帳の文章、表計算の入出力など)
+ * が扱う大きさ。従来の 16KB のまま。 */
+#define PRISM_VFS_MAX_APP_FILE_SIZE 16384
 #define PRISM_VFS_MAX_NAME 31
 
 typedef void *(*vfs_alloc_fn)(size_t size);

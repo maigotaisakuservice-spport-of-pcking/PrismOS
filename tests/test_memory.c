@@ -119,7 +119,9 @@ int main(void) {
     setup_pmm();
     heap_init(0);
     CHECK(heap_is_ready() == 1);
-    CHECK(heap_total_bytes() == (size_t)HEAP_PAGES * 4096);
+    /* 擬似 RAM は 4MB (1024 ページ) しかないため、heap_init は
+     * 2048 ページから 1024 ページへ落とす。実機では 8MB。 */
+    CHECK(heap_total_bytes() == (size_t)1024 * 4096);
     size_t heap_free0 = heap_free_bytes();
     CHECK(heap_free0 > 0);
     CHECK(heap_used_bytes() == heap_total_bytes() - heap_free0);
@@ -178,8 +180,13 @@ int main(void) {
             n++;
         }
         CHECK(n > 0);
-        /* ヒープは 2MB。3MB の確保は失敗すること。 */
-        CHECK(kmalloc(3 * 1024 * 1024) == NULL);
+        /* ヒープは 4MB (上のフォールバック)。3MB の確保は
+         * 成功し、解放すれば空きが元に戻る。ヒープ全体より
+         * 大きな確保は失敗すること。 */
+        void *big3 = kmalloc(3 * 1024 * 1024);
+        CHECK(big3 != NULL);
+        kfree(big3);
+        CHECK(kmalloc(heap_total_bytes()) == NULL);
         for (int i = 0; i < n; i++) {
             kfree(slots[i]);
         }

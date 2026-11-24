@@ -255,6 +255,23 @@ static const char *const PE_SUPPORTED_APIS[] = {
     "VirtualFree",    "Sleep",            "GetTickCount",
     "GetTickCount64", "GetLastError",     "SetConsoleTitleA",
     "GetCurrentProcessId", "IsDebuggerPresent",
+    "GetFileSize",    "SetFilePointer",   "GetFileAttributesA",
+    "DeleteFileA",    "CopyFileA",        "MoveFileA",
+    "GetCurrentDirectoryA", "SetCurrentDirectoryA",
+    "GetEnvironmentVariableA", "SetEnvironmentVariableA",
+    "GetModuleFileNameA", "GetModuleHandleA",
+    "GetVersion",     "GetSystemTime",    "GetLocalTime",
+    "GetConsoleMode", "SetConsoleMode",
+    "GetConsoleScreenBufferInfo",
+    "GetTempPathA",   "GetFullPathNameA",
+    "FindFirstFileA", "FindNextFileA",    "FindClose",
+    "SetLastError",   "GetComputerNameA", "GetUserNameA",
+    "GetSystemInfo",  "GetStartupInfoA",
+    "GetCurrentThreadId",
+    "WriteConsoleW",  "ReadConsoleW",
+    "GetDiskFreeSpaceA",
+    "lstrlenA",       "lstrcpyA",         "lstrcatA",
+    "FormatMessageA",
 };
 
 int pe_import_supported(const pe_import *imp) {
@@ -311,6 +328,137 @@ typedef struct {
 
 static pe_file g_pe_files[PE_MAX_FILES];
 
+/* ゲストのカレントディレクトリ (VFS のルートが既定)。
+ * SetCurrentDirectoryA で VFS にある接頭辞へだけ移れる。 */
+static char g_pe_cwd[64] = ".\\";
+
+/* ゲストの環境変数表 (小規模・固定)。 */
+#define PE_MAX_ENV 8
+typedef struct {
+    int used;
+    char name[32];
+    char value[64];
+} pe_env;
+static pe_env g_pe_env[PE_MAX_ENV];
+
+/* FindFirstFileA / FindNextFileA の状態。 */
+#define PE_MAX_FINDS 2
+typedef struct {
+    int used;
+    char pattern[64];
+    int next_index; /* VFS の次の候補 */
+} pe_find;
+static pe_find g_pe_finds[PE_MAX_FINDS];
+
+static void pe_reset_aux_state(void) {
+    g_pe_cwd[0] = '.';
+    g_pe_cwd[1] = '\\';
+    g_pe_cwd[2] = '\0';
+    for (int i = 0; i < PE_MAX_ENV; i++) {
+        g_pe_env[i].used = 0;
+    }
+    for (int i = 0; i < PE_MAX_FINDS; i++) {
+        g_pe_finds[i].used = 0;
+    }
+}
+
+/* ゲストのメモリへ 16/32 ビットを書く (範囲検査つき)。 */
+static int guest_write_u16(uint64_t ptr, uint16_t v) {
+    if (!compat_ptr_ok(ptr, 2)) {
+        return -1;
+    }
+    *(uint16_t *)(uintptr_t)ptr = v;
+    return 0;
+}
+
+static int guest_write_u32(uint64_t ptr, uint32_t v) {
+    if (!compat_ptr_ok(ptr, 4)) {
+        return -1;
+    }
+    *(uint32_t *)(uintptr_t)ptr = v;
+    return 0;
+}
+
+/* ゲストのメモリへ文字列を写す (終端込み)。収まらなければ -1。 */
+static int guest_copy_out_str(uint64_t ptr, const char *s, size_t cap) {
+    size_t n = strlen(s) + 1;
+    if (cap < n || !compat_ptr_ok(ptr, n)) {
+        return -1;
+    }
+    memcpy((void *)(uintptr_t)ptr, s, n);
+    return 0;
+}
+
+/* Unix 秒を SYSTEMTIME (年・月・曜日・日・時・分・秒・ミリ秒)
+ * の 8 個の u16 へ直す (Howard Hinnant の civil-from-days)。 */
+static void unix_to_systemtime(uint64_t unix, uint16_t *st) {
+    uint64_t days = unix / 86400;
+    uint64_t secs = unix % 86400;
+    uint64_t z = days + 719468;
+    uint64_t era = z / 146097;
+    uint64_t doe = z - era * 146097;
+    uint64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    uint64_t y = yoe + era * 400;
+    uint64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    uint64_t mp = (5 * doy + 2) / 153;
+    uint64_t d = doy - (153 * mp + 2) / 5 + 1;
+    uint64_t m = mp + (mp < 10 ? 3 : -9);
+    if (m <= 2) {
+        y++;
+    }
+    st[0] = (uint16_t)y;
+    st[1] = (uint16_t)m;
+    st[2] = (uint16_t)((days + 4) % 7); /* 1970-01-01 は木曜 */
+    st[3] = (uint16_t)d;
+    st[4] = (uint16_t)(secs / 3600);
+    st[5] = (uint16_t)((secs / 60) % 60);
+    st[6] = (uint16_t)(secs % 60);
+    st[7] = 0;
+}
+
+/* FindFirstFileA のパターン照合: "*" は全部、"xxx*" は接頭辞、
+ * "*.txt" は接尾辞、それ以外は完全一致。 */
+static int find_pattern_match(const char *pattern, const char *name) {
+    if (strcmp(pattern, "*") == 0 || strcmp(pattern, "*.*") == 0) {
+        return 1;
+    }
+    size_t pn = strlen(pattern);
+    if (pn > 0 && pattern[pn - 1] == '*') {
+        size_t pre = pn - 1;
+        return strncmp(name, pattern, pre) == 0;
+    }
+    if (pattern[0] == '*') {
+        const char *suf = pattern + 1;
+        size_t sl = strlen(suf), nl = strlen(name);
+        return nl >= sl && strcmp(name + nl - sl, suf) == 0;
+    }
+    return strcmp(pattern, name) == 0;
+}
+
+/* VFS の i 番目のファイルを WIN32_FIND_DATAA (318 バイト) へ
+ * 書く。構造: 属性 u32、時刻 3x8、サイズ上位 u32、下位 u32、
+ * 予約 2x u32、名前 260、別名 14。 */
+static int find_fill(uint64_t out_ptr, int index) {
+    const char *name = vfs_file_name(index);
+    if (name == NULL || !compat_ptr_ok(out_ptr, 318)) {
+        return -1;
+    }
+    size_t len = 0;
+    const char *data = vfs_read_ptr(name, &len);
+    (void)data;
+    uint8_t *p = (uint8_t *)(uintptr_t)out_ptr;
+    memset(p, 0, 318);
+    *(uint32_t *)(p + 0) = 0x80; /* FILE_ATTRIBUTE_NORMAL */
+    *(uint32_t *)(p + 28) = (uint32_t)(len >> 32); /* nFileSizeHigh */
+    *(uint32_t *)(p + 32) = (uint32_t)(len & 0xFFFFFFFF); /* nFileSizeLow */
+    size_t nl = strlen(name);
+    if (nl > 259) {
+        nl = 259;
+    }
+    memcpy(p + 44, name, nl);
+    return 0;
+}
+
 void pe_set_context(const pe_info *info, const pe_io *io,
                     compat_image *img) {
     g_pe = info;
@@ -326,6 +474,7 @@ void pe_set_context(const pe_info *info, const pe_io *io,
     for (int i = 0; i < PE_MAX_FILES; i++) {
         g_pe_files[i].used = 0;
     }
+    pe_reset_aux_state();
 }
 
 void pe_clear_context(void) {
@@ -432,6 +581,7 @@ static int64_t win_write_file(uint64_t h, uint64_t buf, uint64_t n,
              i++) {
             f->wbuf[f->wlen++] = (char)p[i];
         }
+        f->size = f->wlen; /* 書き込みハンドルの現在長を保つ */
         written = (uint32_t)n;
     }
     if (written_ptr != 0) {
@@ -646,6 +796,711 @@ int64_t pe_win32_dispatch(uint32_t index, compat_regs *r) {
     }
     if (strcmp(fn, "IsDebuggerPresent") == 0) {
         return 0;
+    }
+    if (strcmp(fn, "GetCurrentThreadId") == 0) {
+        return 1;
+    }
+    if (strcmp(fn, "GetFileSize") == 0) {
+        uint64_t h = r->rcx;
+        uint64_t high_ptr = r->rdx;
+        if (h <= 2) {
+            g_last_error = 6;
+            return 0xFFFFFFFFu;
+        }
+        pe_file *f = pe_file_of(h);
+        if (f == NULL) {
+            g_last_error = 6;
+            return 0xFFFFFFFFu;
+        }
+        uint64_t size = f->size;
+        if (high_ptr != 0) {
+            if (guest_write_u32(high_ptr,
+                                (uint32_t)(size >> 32)) != 0) {
+                g_last_error = 998;
+                return 0xFFFFFFFFu;
+            }
+        }
+        return (int64_t)(uint32_t)size;
+    }
+    if (strcmp(fn, "SetFilePointer") == 0) {
+        uint64_t h = r->rcx;
+        int32_t low = (int32_t)(uint32_t)r->rdx;
+        uint64_t high_ptr = r->r8;
+        uint32_t method = (uint32_t)r->r9;
+        pe_file *f = pe_file_of(h);
+        if (f == NULL) {
+            g_last_error = 6;
+            return 0xFFFFFFFFu;
+        }
+        int64_t base = 0;
+        if (method == 0) { /* FILE_BEGIN */
+            base = 0;
+        } else if (method == 1) { /* FILE_CURRENT */
+            base = (int64_t)f->off;
+        } else if (method == 2) { /* FILE_END */
+            base = (int64_t)f->size;
+        } else {
+            g_last_error = 87; /* ERROR_INVALID_PARAMETER */
+            return 0xFFFFFFFFu;
+        }
+        int64_t dist = (int64_t)low;
+        if (high_ptr != 0) {
+            if (!compat_ptr_ok(high_ptr, 4)) {
+                g_last_error = 998;
+                return 0xFFFFFFFFu;
+            }
+            dist |= (int64_t)(int32_t)(
+                *(uint32_t *)(uintptr_t)high_ptr) << 32;
+        }
+        int64_t at = base + dist;
+        if (at < 0) {
+            g_last_error = 87;
+            return 0xFFFFFFFFu;
+        }
+        f->off = (size_t)at;
+        return (int64_t)(uint32_t)at;
+    }
+    if (strcmp(fn, "GetFileAttributesA") == 0) {
+        char name[64];
+        if (guest_copy_in_str(r->rcx, name, sizeof(name)) != 0) {
+            g_last_error = 123;
+            return 0xFFFFFFFFu;
+        }
+        if (pe_path_protected(name)) {
+            g_last_error = 5;
+            return 0xFFFFFFFFu;
+        }
+        if (vfs_exists(name) != 1) {
+            /* ディレクトリ扱い: その接頭辞のファイルがあれば */
+            size_t nl = strlen(name);
+            int is_dir = 0;
+            int count = vfs_file_count();
+            for (int i = 0; i < count; i++) {
+                const char *fn2 = vfs_file_name(i);
+                if (fn2 != NULL && strncmp(fn2, name, nl) == 0 &&
+                    fn2[nl] == '/') {
+                    is_dir = 1;
+                }
+            }
+            if (!is_dir) {
+                g_last_error = 2;
+                return 0xFFFFFFFFu;
+            }
+            return 0x10; /* FILE_ATTRIBUTE_DIRECTORY */
+        }
+        return 0x80; /* FILE_ATTRIBUTE_NORMAL */
+    }
+    if (strcmp(fn, "DeleteFileA") == 0) {
+        char name[64];
+        if (guest_copy_in_str(r->rcx, name, sizeof(name)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        if (pe_path_protected(name)) {
+            g_last_error = 5;
+            return 0;
+        }
+        if (vfs_delete(name) != 0) {
+            g_last_error = 2;
+            return 0;
+        }
+        return 1;
+    }
+    if (strcmp(fn, "CopyFileA") == 0 ||
+        strcmp(fn, "MoveFileA") == 0) {
+        char src[64], dst[64];
+        int is_move = (fn[0] == 'M');
+        if (guest_copy_in_str(r->rcx, src, sizeof(src)) != 0 ||
+            guest_copy_in_str(r->rdx, dst, sizeof(dst)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        int fail_if_exists = (r->r8 != 0);
+        if (pe_path_protected(src) || pe_path_protected(dst)) {
+            g_last_error = 5;
+            return 0;
+        }
+        if (fail_if_exists && vfs_exists(dst) == 1) {
+            g_last_error = 80; /* ERROR_FILE_EXISTS */
+            return 0;
+        }
+        size_t len = 0;
+        const char *data = vfs_read_ptr(src, &len);
+        if (data == NULL) {
+            g_last_error = 2;
+            return 0;
+        }
+        if (vfs_write(dst, data, len) != 0) {
+            g_last_error = 112; /* ERROR_DISK_FULL 相当 */
+            return 0;
+        }
+        if (is_move) {
+            vfs_delete(src);
+        }
+        return 1;
+    }
+    if (strcmp(fn, "GetCurrentDirectoryA") == 0) {
+        uint32_t cap = (uint32_t)r->rcx;
+        uint64_t buf = r->rdx;
+        size_t n = strlen(g_pe_cwd);
+        if (cap == 0) {
+            return (int64_t)(n + 1);
+        }
+        if (cap < n + 1 || !compat_ptr_ok(buf, n + 1)) {
+            g_last_error = 122; /* ERROR_INSUFFICIENT_BUFFER */
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)buf, g_pe_cwd, n + 1);
+        return (int64_t)n;
+    }
+    if (strcmp(fn, "SetCurrentDirectoryA") == 0) {
+        char path[64];
+        if (guest_copy_in_str(r->rcx, path, sizeof(path)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        if (strcmp(path, ".\\") == 0 || strcmp(path, ".") == 0 ||
+            strcmp(path, "") == 0) {
+            g_pe_cwd[0] = '.';
+            g_pe_cwd[1] = '\\';
+            g_pe_cwd[2] = '\0';
+            return 1;
+        }
+        /* 接頭辞として VFS にあるパスだけ受け入れる。 */
+        size_t nl = strlen(path);
+        while (nl > 0 && (path[nl - 1] == '\\' ||
+                          path[nl - 1] == '/')) {
+            nl--;
+        }
+        int ok = 0;
+        int count = vfs_file_count();
+        for (int i = 0; i < count; i++) {
+            const char *fn2 = vfs_file_name(i);
+            if (fn2 != NULL && strncmp(fn2, path, nl) == 0 &&
+                fn2[nl] == '/') {
+                ok = 1;
+            }
+        }
+        if (!ok) {
+            g_last_error = 3; /* ERROR_PATH_NOT_FOUND */
+            return 0;
+        }
+        if (nl + 2 > sizeof(g_pe_cwd)) {
+            g_last_error = 206; /* ERROR_FILENAME_EXCED_RANGE */
+            return 0;
+        }
+        memcpy(g_pe_cwd, path, nl);
+        g_pe_cwd[nl] = '\\';
+        g_pe_cwd[nl + 1] = '\0';
+        return 1;
+    }
+    if (strcmp(fn, "GetEnvironmentVariableA") == 0) {
+        char name[32];
+        uint32_t cap = (uint32_t)r->r8;
+        if (guest_copy_in_str(r->rcx, name, sizeof(name)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        for (int i = 0; i < PE_MAX_ENV; i++) {
+            if (g_pe_env[i].used &&
+                strcmp(g_pe_env[i].name, name) == 0) {
+                size_t n = strlen(g_pe_env[i].value);
+                if (cap == 0) {
+                    return (int64_t)(n + 1);
+                }
+                if (cap < n + 1 ||
+                    !compat_ptr_ok(r->rdx, n + 1)) {
+                    g_last_error = 122;
+                    return 0;
+                }
+                memcpy((void *)(uintptr_t)r->rdx,
+                       g_pe_env[i].value, n + 1);
+                return (int64_t)n;
+            }
+        }
+        g_last_error = 203; /* ERROR_ENVVAR_NOT_FOUND */
+        return 0;
+    }
+    if (strcmp(fn, "SetEnvironmentVariableA") == 0) {
+        char name[32], value[64];
+        if (guest_copy_in_str(r->rcx, name, sizeof(name)) != 0 ||
+            (r->rdx != 0 &&
+             guest_copy_in_str(r->rdx, value, sizeof(value)) != 0)) {
+            g_last_error = 123;
+            return 0;
+        }
+        if (r->rdx == 0) { /* 削除 */
+            for (int i = 0; i < PE_MAX_ENV; i++) {
+                if (g_pe_env[i].used &&
+                    strcmp(g_pe_env[i].name, name) == 0) {
+                    g_pe_env[i].used = 0;
+                }
+            }
+            return 1;
+        }
+        for (int i = 0; i < PE_MAX_ENV; i++) {
+            if (g_pe_env[i].used &&
+                strcmp(g_pe_env[i].name, name) == 0) {
+                size_t vl = strlen(value);
+                if (vl + 1 > sizeof(g_pe_env[i].value)) {
+                    vl = sizeof(g_pe_env[i].value) - 1;
+                }
+                memcpy(g_pe_env[i].value, value, vl);
+                g_pe_env[i].value[vl] = '\0';
+                return 1;
+            }
+        }
+        for (int i = 0; i < PE_MAX_ENV; i++) {
+            if (!g_pe_env[i].used) {
+                g_pe_env[i].used = 1;
+                size_t nl2 = strlen(name);
+                if (nl2 + 1 > sizeof(g_pe_env[i].name)) {
+                    nl2 = sizeof(g_pe_env[i].name) - 1;
+                }
+                memcpy(g_pe_env[i].name, name, nl2);
+                g_pe_env[i].name[nl2] = '\0';
+                size_t vl = strlen(value);
+                if (vl + 1 > sizeof(g_pe_env[i].value)) {
+                    vl = sizeof(g_pe_env[i].value) - 1;
+                }
+                memcpy(g_pe_env[i].value, value, vl);
+                g_pe_env[i].value[vl] = '\0';
+                return 1;
+            }
+        }
+        g_last_error = 122;
+        return 0;
+    }
+    if (strcmp(fn, "GetModuleFileNameA") == 0) {
+        uint64_t buf = r->rdx;
+        uint32_t cap = (uint32_t)r->r8;
+        const char *name = g_pe_io.image_name;
+        if (name == NULL) {
+            name = "";
+        }
+        size_t n = strlen(name);
+        if (cap == 0) {
+            return 0;
+        }
+        if (cap <= n) {
+            if (!compat_ptr_ok(buf, cap)) {
+                g_last_error = 998;
+                return 0;
+            }
+            memcpy((void *)(uintptr_t)buf, name, cap);
+            return (int64_t)cap;
+        }
+        if (guest_copy_out_str(buf, name, cap) != 0) {
+            g_last_error = 998;
+            return 0;
+        }
+        return (int64_t)n;
+    }
+    if (strcmp(fn, "GetModuleHandleA") == 0) {
+        if (r->rcx == 0) {
+            return (int64_t)g_pe->image_base;
+        }
+        char name[64];
+        if (guest_copy_in_str(r->rcx, name, sizeof(name)) != 0) {
+            return 0;
+        }
+        const char *img = g_pe_io.image_name;
+        if (img != NULL && strcmp(name, img) == 0) {
+            return (int64_t)g_pe->image_base;
+        }
+        return 0;
+    }
+    if (strcmp(fn, "GetVersion") == 0) {
+        /* 10.0 build 19045。 */
+        return (int64_t)((19045u << 16) | (0u << 8) | 10u);
+    }
+    if (strcmp(fn, "GetSystemTime") == 0 ||
+        strcmp(fn, "GetLocalTime") == 0) {
+        uint64_t unix = (g_pe_io.unix_time != NULL)
+                            ? g_pe_io.unix_time()
+                            : 0;
+        uint16_t st[8];
+        unix_to_systemtime(unix, st);
+        if (!compat_ptr_ok(r->rcx, 16)) {
+            g_last_error = 998;
+            return 0;
+        }
+        for (int i = 0; i < 8; i++) {
+            if (guest_write_u16(r->rcx + (uint64_t)i * 2,
+                                st[i]) != 0) {
+                g_last_error = 998;
+                return 0;
+            }
+        }
+        return 0;
+    }
+    if (strcmp(fn, "GetConsoleMode") == 0) {
+        if (guest_write_u32(r->rdx, 0x7) != 0) {
+            g_last_error = 998;
+            return 0;
+        }
+        return 1;
+    }
+    if (strcmp(fn, "SetConsoleMode") == 0) {
+        return 1; /* モードは保持しない (表示先が無いため) */
+    }
+    if (strcmp(fn, "GetConsoleScreenBufferInfo") == 0) {
+        if (!compat_ptr_ok(r->rcx, 22)) {
+            g_last_error = 998;
+            return 0;
+        }
+        uint8_t *p = (uint8_t *)(uintptr_t)r->rcx;
+        memset(p, 0, 22);
+        *(uint16_t *)(p + 0) = 80;   /* dwSize.X */
+        *(uint16_t *)(p + 2) = 25;   /* dwSize.Y */
+        *(uint16_t *)(p + 4) = 0;    /* dwCursorPosition.X */
+        *(uint16_t *)(p + 6) = 0;    /* dwCursorPosition.Y */
+        *(uint16_t *)(p + 8) = 7;    /* wAttributes */
+        *(uint16_t *)(p + 10) = 0;   /* srWindow.Left */
+        *(uint16_t *)(p + 12) = 0;   /* srWindow.Top */
+        *(uint16_t *)(p + 14) = 79;  /* srWindow.Right */
+        *(uint16_t *)(p + 16) = 24;  /* srWindow.Bottom */
+        *(uint16_t *)(p + 18) = 80;  /* dwMaximumWindowSize.X */
+        *(uint16_t *)(p + 20) = 25;  /* dwMaximumWindowSize.Y */
+        return 1;
+    }
+    if (strcmp(fn, "GetTempPathA") == 0) {
+        uint32_t cap = (uint32_t)r->rcx;
+        uint64_t buf = r->rdx;
+        if (cap == 0) {
+            return 3;
+        }
+        if (cap < 3 || !compat_ptr_ok(buf, 3)) {
+            g_last_error = 122;
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)buf, ".\\", 3);
+        return 2;
+    }
+    if (strcmp(fn, "GetFullPathNameA") == 0) {
+        char name[64];
+        uint32_t cap = (uint32_t)r->rdx;
+        uint64_t buf = r->r8;
+        if (guest_copy_in_str(r->rcx, name, sizeof(name)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        size_t n = strlen(name);
+        if (cap == 0) {
+            return (int64_t)(n + 1);
+        }
+        if (cap < n + 1 || !compat_ptr_ok(buf, n + 1)) {
+            g_last_error = 122;
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)buf, name, n + 1);
+        if (r->r9 != 0) {
+            /* lpFilePart: ファイル名部分へのポインタ (64 ビット)。 */
+            const char *base = name;
+            for (size_t i = 0; i < n; i++) {
+                if (name[i] == '\\' || name[i] == '/') {
+                    base = name + i + 1;
+                }
+            }
+            uint64_t part_va = buf + (uint64_t)(base - name);
+            if (!compat_ptr_ok(r->r9, 8)) {
+                g_last_error = 998;
+                return 0;
+            }
+            *(uint64_t *)(uintptr_t)r->r9 = part_va;
+        }
+        return (int64_t)n;
+    }
+    if (strcmp(fn, "FindFirstFileA") == 0) {
+        char pattern[64];
+        if (guest_copy_in_str(r->rcx, pattern, sizeof(pattern)) != 0) {
+            g_last_error = 123;
+            return -1;
+        }
+        int count = vfs_file_count();
+        for (int i = 0; i < count; i++) {
+            const char *fn2 = vfs_file_name(i);
+            if (fn2 != NULL && find_pattern_match(pattern, fn2)) {
+                for (int s = 0; s < PE_MAX_FINDS; s++) {
+                    if (!g_pe_finds[s].used) {
+                        g_pe_finds[s].used = 1;
+                        size_t pl = strlen(pattern);
+                        if (pl + 1 > sizeof(g_pe_finds[s].pattern)) {
+                            pl = sizeof(g_pe_finds[s].pattern) - 1;
+                        }
+                        memcpy(g_pe_finds[s].pattern, pattern, pl);
+                        g_pe_finds[s].pattern[pl] = '\0';
+                        g_pe_finds[s].next_index = i + 1;
+                        if (find_fill(r->rdx, i) != 0) {
+                            g_pe_finds[s].used = 0;
+                            g_last_error = 998;
+                            return -1;
+                        }
+                        return (int64_t)(0x200 + s);
+                    }
+                }
+                g_last_error = 4;
+                return -1;
+            }
+        }
+        g_last_error = 2;
+        return -1;
+    }
+    if (strcmp(fn, "FindNextFileA") == 0) {
+        uint64_t h = r->rcx;
+        if (h < 0x200 || h >= 0x200 + PE_MAX_FINDS) {
+            g_last_error = 6;
+            return 0;
+        }
+        pe_find *f = &g_pe_finds[h - 0x200];
+        if (!f->used) {
+            g_last_error = 6;
+            return 0;
+        }
+        int count = vfs_file_count();
+        for (int i = f->next_index; i < count; i++) {
+            const char *fn2 = vfs_file_name(i);
+            if (fn2 != NULL &&
+                find_pattern_match(f->pattern, fn2)) {
+                f->next_index = i + 1;
+                if (find_fill(r->rdx, i) != 0) {
+                    g_last_error = 998;
+                    return 0;
+                }
+                return 1;
+            }
+        }
+        g_last_error = 18; /* ERROR_NO_MORE_FILES */
+        return 0;
+    }
+    if (strcmp(fn, "FindClose") == 0) {
+        uint64_t h = r->rcx;
+        if (h >= 0x200 && h < 0x200 + PE_MAX_FINDS) {
+            g_pe_finds[h - 0x200].used = 0;
+            return 1;
+        }
+        g_last_error = 6;
+        return 0;
+    }
+    if (strcmp(fn, "SetLastError") == 0) {
+        g_last_error = (uint32_t)r->rcx;
+        return 0;
+    }
+    if (strcmp(fn, "GetComputerNameA") == 0) {
+        /* lpBuffer=rcx, lpnSize=rdx (DWORD へのポインタ)。 */
+        const char *name = "PRISM";
+        size_t n = strlen(name);
+        if (r->rdx == 0 || !compat_ptr_ok(r->rdx, 4)) {
+            g_last_error = 998;
+            return 0;
+        }
+        uint32_t cap = *(uint32_t *)(uintptr_t)r->rdx;
+        if (cap < n + 1 || !compat_ptr_ok(r->rcx, n + 1)) {
+            g_last_error = 122;
+            *(uint32_t *)(uintptr_t)r->rdx = (uint32_t)(n + 1);
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)r->rcx, name, n + 1);
+        *(uint32_t *)(uintptr_t)r->rdx = (uint32_t)n;
+        return 1;
+    }
+    if (strcmp(fn, "GetUserNameA") == 0) {
+        /* lpBuffer=rcx, pcbBuffer=rdx (DWORD へのポインタ)。 */
+        const char *name = "admin";
+        size_t n = strlen(name);
+        if (r->rdx == 0 || !compat_ptr_ok(r->rdx, 4)) {
+            g_last_error = 998;
+            return 0;
+        }
+        uint32_t cap = *(uint32_t *)(uintptr_t)r->rdx;
+        if (cap < n + 1 || !compat_ptr_ok(r->rcx, n + 1)) {
+            g_last_error = 122;
+            *(uint32_t *)(uintptr_t)r->rdx = (uint32_t)(n + 1);
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)r->rcx, name, n + 1);
+        *(uint32_t *)(uintptr_t)r->rdx = (uint32_t)n;
+        return 1;
+    }
+    if (strcmp(fn, "GetSystemInfo") == 0) {
+        /* SYSTEM_INFO は 64 ビットで 48 バイト。 */
+        if (!compat_ptr_ok(r->rcx, 48)) {
+            g_last_error = 998;
+            return 0;
+        }
+        uint8_t *p = (uint8_t *)(uintptr_t)r->rcx;
+        memset(p, 0, 48);
+        *(uint16_t *)(p + 0) = 9;    /* PROCESSOR_ARCHITECTURE_AMD64 */
+        *(uint16_t *)(p + 2) = 0;
+        *(uint32_t *)(p + 4) = 4096; /* dwPageSize */
+        *(uint64_t *)(p + 8) = 0x10000; /* lpMinimumApplicationAddress */
+        *(uint64_t *)(p + 16) = 0x7FFEFFFF; /* lpMaximumApplicationAddress */
+        *(uint64_t *)(p + 24) = 1;   /* dwActiveProcessorMask */
+        *(uint32_t *)(p + 32) = 1;   /* dwNumberOfProcessors */
+        *(uint32_t *)(p + 36) = 8664; /* dwProcessorType */
+        *(uint32_t *)(p + 40) = 65536; /* dwAllocationGranularity */
+        *(uint16_t *)(p + 44) = 6;   /* wProcessorLevel */
+        *(uint16_t *)(p + 46) = 0;   /* wProcessorRevision */
+        return 0;
+    }
+    if (strcmp(fn, "GetStartupInfoA") == 0) {
+        /* STARTUPINFOA は 64 ビットで 96 バイト。 */
+        if (!compat_ptr_ok(r->rcx, 96)) {
+            g_last_error = 998;
+            return 0;
+        }
+        memset((void *)(uintptr_t)r->rcx, 0, 96);
+        *(uint32_t *)(uintptr_t)r->rcx = 96; /* cb */
+        return 0;
+    }
+    if (strcmp(fn, "WriteConsoleW") == 0) {
+        if (!compat_ptr_ok(r->rdx, (size_t)r->r8 * 2)) {
+            g_last_error = 998;
+            return 0;
+        }
+        char tmp[1024];
+        size_t n = (size_t)r->r8;
+        if (n > sizeof(tmp) - 1) {
+            n = sizeof(tmp) - 1;
+        }
+        const uint16_t *w = (const uint16_t *)(uintptr_t)r->rdx;
+        for (size_t i = 0; i < n; i++) {
+            tmp[i] = (w[i] < 0x80) ? (char)w[i] : '?';
+        }
+        tmp[n] = '\0';
+        write_out(tmp, n);
+        if (r->r9 != 0) {
+            if (guest_write_u32(r->r9, (uint32_t)r->r8) != 0) {
+                g_last_error = 998;
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (strcmp(fn, "ReadConsoleW") == 0) {
+        if (g_pe_io.io == NULL || g_pe_io.io->read_in == NULL) {
+            return 0;
+        }
+        if (!compat_ptr_ok(r->rdx, (size_t)r->r8 * 2)) {
+            g_last_error = 998;
+            return 0;
+        }
+        char tmp[1024];
+        size_t cap = (size_t)r->r8;
+        if (cap > sizeof(tmp) - 1) {
+            cap = sizeof(tmp) - 1;
+        }
+        int got = g_pe_io.io->read_in(tmp, cap);
+        if (got < 0) {
+            got = 0;
+        }
+        uint16_t *w = (uint16_t *)(uintptr_t)r->rdx;
+        for (int i = 0; i < got; i++) {
+            w[i] = (uint16_t)(uint8_t)tmp[i];
+        }
+        if (r->r9 != 0) {
+            if (guest_write_u32(r->r9, (uint32_t)got) != 0) {
+                g_last_error = 998;
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (strcmp(fn, "GetDiskFreeSpaceA") == 0) {
+        if (!compat_ptr_ok(r->rdx, 4) ||
+            !compat_ptr_ok(r->r8, 4) ||
+            !compat_ptr_ok(r->r9, 4) ||
+            !compat_ptr_ok(stack_arg(r, 5), 4)) {
+            g_last_error = 998;
+            return 0;
+        }
+        if (guest_write_u32(r->rdx, 8) != 0 ||
+            guest_write_u32(r->r8, 512) != 0 ||
+            guest_write_u32(r->r9, 100000) != 0 ||
+            guest_write_u32(stack_arg(r, 5), 200000) != 0) {
+            g_last_error = 998;
+            return 0;
+        }
+        return 1;
+    }
+    if (strcmp(fn, "lstrlenA") == 0) {
+        return (int64_t)guest_strlen(r->rcx, 4096);
+    }
+    if (strcmp(fn, "lstrcpyA") == 0) {
+        char tmp[256];
+        if (guest_copy_in_str(r->rdx, tmp, sizeof(tmp)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        if (guest_copy_out_str(r->rcx, tmp, 4096) != 0) {
+            g_last_error = 998;
+            return 0;
+        }
+        return (int64_t)r->rcx;
+    }
+    if (strcmp(fn, "lstrcatA") == 0) {
+        char dst[256], src[256];
+        size_t dl = guest_strlen(r->rcx, sizeof(dst) - 1);
+        if (dl >= sizeof(dst) - 1 ||
+            guest_copy_in_str(r->rdx, src, sizeof(src)) != 0) {
+            g_last_error = 123;
+            return 0;
+        }
+        for (size_t i = 0; i <= dl; i++) {
+            dst[i] = *(const char *)(uintptr_t)(r->rcx + i);
+        }
+        size_t sl = strlen(src);
+        if (dl + sl + 1 > 4096 ||
+            !compat_ptr_ok(r->rcx + dl, sl + 1)) {
+            g_last_error = 998;
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)(r->rcx + dl), src, sl + 1);
+        return (int64_t)r->rcx;
+    }
+    if (strcmp(fn, "FormatMessageA") == 0) {
+        /* FormatMessageA(flags, source, code, lang, buf, size, ...)。
+         * buf は 5 番目の引数、size は 6 番目の引数 (スタック)。 */
+        uint32_t flags = (uint32_t)r->rcx;
+        uint32_t code = (uint32_t)r->r8;
+        uint64_t buf = stack_arg(r, 5);
+        uint32_t cap = (uint32_t)stack_arg(r, 6);
+        (void)flags;
+        char msg[64];
+        size_t n = 0;
+        const char *head = "Unknown error ";
+        while (*head != '\0') {
+            msg[n++] = *head++;
+        }
+        char num[12];
+        int nn = 0;
+        if (code == 0) {
+            num[nn++] = '0';
+        } else {
+            char rev[12];
+            int ri = 0;
+            uint32_t c = code;
+            while (c > 0) {
+                rev[ri++] = (char)('0' + (c % 10));
+                c /= 10;
+            }
+            while (ri > 0) {
+                num[nn++] = rev[--ri];
+            }
+        }
+        for (int i = 0; i < nn; i++) {
+            msg[n++] = num[i];
+        }
+        msg[n] = '\0';
+        if (buf == 0 || cap == 0) {
+            return (int64_t)n;
+        }
+        if (cap < n + 1 || !compat_ptr_ok(buf, n + 1)) {
+            g_last_error = 122;
+            return 0;
+        }
+        memcpy((void *)(uintptr_t)buf, msg, n + 1);
+        return (int64_t)n;
     }
     return -COMPAT_ENOSYS;
 }

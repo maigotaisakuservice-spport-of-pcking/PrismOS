@@ -16,7 +16,7 @@ and checks the kernel update end to end:
   5. on an old-style disk (12MB boot partition, FAT12) the same
      update fails honestly ("boot partition is not FAT16"),
      the file update rolls back, and the old kernel still boots;
-  6. an oversized kernel image (26MB, correct hash) fills the
+  6. an oversized kernel image (30MB, correct hash) fills the
      boot partition mid-stream, fails honestly ("ran out of
      space"), and the previous kernel still boots.
 
@@ -401,7 +401,7 @@ def main():
         # --- Boot 4: oversized kernel on the standard disk. ---
         # The download fills the boot partition mid-stream and
         # must fail honestly; the 0.3.0 kernel must still boot.
-        big_kernel = bytes(26 * 1024 * 1024)
+        big_kernel = bytes(30 * 1024 * 1024)
         version_040 = b"0.4.0\n"
         write_bytes(os.path.join(WWW, "updates", "VERSION"), version_040)
         write_bytes(os.path.join(WWW, "updates", "kernel.elf"), big_kernel)
@@ -410,7 +410,7 @@ def main():
                             [("VERSION", version_040)],
                             sha256_hex(big_kernel)))
         sign(os.path.join(WWW, "update-manifest.txt"))
-        print("oversized kernel: 26MB, hash in manifest")
+        print("oversized kernel: 30MB, hash in manifest")
         b = Boot(LOG, DISK, with_cd=True, with_net=True)
         try:
             boot_prompt(b, "PrismOS 27H1")

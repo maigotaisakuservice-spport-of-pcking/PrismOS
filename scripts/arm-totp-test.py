@@ -17,6 +17,17 @@ QEMU の virt 構成 + virtio-blk で確かめる。
 
 使い方: python3 scripts/arm-totp-test.py
 成功したら "ARM TOTP TEST PASSED" と出す。
+
+注意: テスト用ディスクは一時ディレクトリ (tmpfs) に置く。
+2026-11-24 に実測: useradd / totp setup の全ファイル同期は
+約 1380 回の 512B 書き込みで、QEMU の virtio-blk 完了が
+このホストの /home では 1 要求あたり約 27ms (計 31〜59 秒)
+かかり、30 秒タイムアウトを超えて失敗する。/tmp (tmpfs)
+では 0.6 秒で終わる。旧ツリー (722f64a) でも 31.6 秒と
+同じで、製品の回帰でも書き込みの誤りでもない (長い
+タイムアウトでは useradd / totp setup / ログインが
+すべて通る)。ホストのディスク速度を測るテストではない
+ため、速い一時領域を使う。ディスクは毎回作り直す。
 """
 import base64
 import hashlib
@@ -27,11 +38,12 @@ import select
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KERNEL = os.path.join(ROOT, "build", "kernel-arm.bin")
-DISK = os.path.join(ROOT, "build", "arm-totp-test.img")
+DISK = os.path.join(tempfile.gettempdir(), "prismos-arm-totp-test.img")
 LOG = os.path.join(ROOT, "build", "arm-totp.log")
 
 FAILURES = []

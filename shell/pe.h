@@ -21,6 +21,12 @@
  *     (USER32/GDI32) は未対応。DLL は KERNEL32.dll のみ。
  *   - 引数の 5 番目以降はゲストスタックから読む
  *     (compat_gate.S のレジスタ保存並びに依存する)。
+ *   - ファイル系 API は VFS のフラットな名前空間で動く
+ *     (ディレクトリ実体は無い。GetFileAttributesA の
+ *     ディレクトリ判定は接頭辞の有無による)。
+ *   - GetSystemTime/GetLocalTime は UTC を返す
+ *     (タイムゾーン補正なし)。GetComputerNameA は
+ *     "PRISM"、GetUserNameA は "admin" を返す。
  */
 #ifndef PRISM_PE_H
 #define PRISM_PE_H
@@ -80,12 +86,17 @@ int pe_import_supported(const pe_import *imp);
 /* ランナーが渡す文脈。sleep/tick は任意 (NULL なら
  * Sleep は即時復帰、GetTickCount は 0)。cmdline_va は
  * GetCommandLineA が返すゲスト側アドレス (0 なら
- * 空文字列のアドレスとして 0 を返す)。 */
+ * 空文字列のアドレスとして 0 を返す)。image_name は
+ * GetModuleFileNameA が返す実行ファイル名 (NULL なら
+ * 空)。unix_time は GetSystemTime/GetLocalTime 用の
+ * Unix 秒 (NULL なら 0 = 1970-01-01)。 */
 typedef struct {
     const compat_io *io;
     void (*sleep_ms)(uint32_t ms);
     uint32_t (*tick_ms)(void);
     uint64_t cmdline_va;
+    const char *image_name;
+    uint64_t (*unix_time)(void);
 } pe_io;
 
 void pe_set_context(const pe_info *info, const pe_io *io,
