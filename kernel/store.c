@@ -26,7 +26,7 @@ static void store_err_copy(char *dst, size_t cap, const char *src) {
 
 
 static uint8_t store_pk[MLDSA44_PK_LEN];
-static uint8_t store_payload_buf[PRISM_VFS_MAX_FILE_SIZE];
+static uint8_t store_payload_buf[PRISM_VFS_MAX_APP_FILE_SIZE];
 
 static int store_load_pub(void) {
     size_t len = 0;

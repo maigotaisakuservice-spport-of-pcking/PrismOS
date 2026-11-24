@@ -658,7 +658,7 @@ static int wallpaper_ok;
 /* 自分の壁紙 (写真アプリで選んだ 24bit BMP)。wallpaper_img の
  * pixels は元データを指すだけなので、バイト列を専用バッファに
  * 保持してから解析する。 */
-static uint8_t wp_custom_buf[PRISM_VFS_MAX_FILE_SIZE];
+static uint8_t wp_custom_buf[PRISM_VFS_MAX_APP_FILE_SIZE];
 static wallpaper_img wp_custom_img;
 static int wp_custom_ok;
 
@@ -7603,7 +7603,7 @@ static void notes_load(void) {
          * the buffer must hold that plus the NUL. (This
          * was kmalloc(4097): opening a note.txt over 4KB
          * overflowed the heap.) */
-        notes_buf = (char *)kmalloc(PRISM_VFS_MAX_FILE_SIZE + 1);
+        notes_buf = (char *)kmalloc(PRISM_VFS_MAX_APP_FILE_SIZE + 1);
         if (notes_buf == NULL) {
             return;
         }
@@ -7612,7 +7612,7 @@ static void notes_load(void) {
     size_t len = 0;
     const char *content = vfs_read_ptr("note.txt", &len);
     if (content != NULL && len > 0) {
-        size_t copy = len < PRISM_VFS_MAX_FILE_SIZE ? len : PRISM_VFS_MAX_FILE_SIZE;
+        size_t copy = len < PRISM_VFS_MAX_APP_FILE_SIZE ? len : PRISM_VFS_MAX_APP_FILE_SIZE;
         for (size_t i = 0; i < copy; i++) {
             notes_buf[i] = content[i];
         }
@@ -7679,7 +7679,7 @@ static void notes_undo_push(int group) {
         }
         notes_undo_count--;
     }
-    char *copy = (char *)kmalloc(PRISM_VFS_MAX_FILE_SIZE + 1);
+    char *copy = (char *)kmalloc(PRISM_VFS_MAX_APP_FILE_SIZE + 1);
     if (copy == NULL) {
         return;
     }
@@ -7700,7 +7700,7 @@ static void notes_undo_apply(void) {
     }
     if (notes_redo_buf == NULL) {
         notes_redo_buf =
-            (char *)kmalloc(PRISM_VFS_MAX_FILE_SIZE + 1);
+            (char *)kmalloc(PRISM_VFS_MAX_APP_FILE_SIZE + 1);
     }
     if (notes_redo_buf != NULL) {
         memcpy(notes_redo_buf, notes_buf, notes_len + 1);
@@ -7738,7 +7738,7 @@ static void notes_redo_apply(void) {
         }
         notes_undo_count--;
     }
-    char *copy = (char *)kmalloc(PRISM_VFS_MAX_FILE_SIZE + 1);
+    char *copy = (char *)kmalloc(PRISM_VFS_MAX_APP_FILE_SIZE + 1);
     if (copy == NULL) {
         return;
     }
@@ -7809,14 +7809,14 @@ static int notes_replace_all(void) {
         return 0;
     }
     notes_undo_push(1);
-    static char tmp[PRISM_VFS_MAX_FILE_SIZE + 1];
+    static char tmp[PRISM_VFS_MAX_APP_FILE_SIZE + 1];
     size_t out = 0;
     size_t i = 0;
     int count = 0;
     while (i < notes_len) {
         if (i + tl <= notes_len &&
             memcmp(notes_buf + i, notes_find_term, tl) == 0) {
-            if (out + rl > PRISM_VFS_MAX_FILE_SIZE) {
+            if (out + rl > PRISM_VFS_MAX_APP_FILE_SIZE) {
                 break;
             }
             memcpy(tmp + out, notes_repl_buf, rl);
@@ -7824,7 +7824,7 @@ static int notes_replace_all(void) {
             i += tl;
             count++;
         } else {
-            if (out + 1 > PRISM_VFS_MAX_FILE_SIZE) {
+            if (out + 1 > PRISM_VFS_MAX_APP_FILE_SIZE) {
                 break;
             }
             tmp[out++] = notes_buf[i++];
@@ -7988,7 +7988,7 @@ static void draw_notes(void) {
 static void notes_insert_text(const char *text) {
     notes_undo_push(1);
     for (size_t i = 0; text[i] != '\0'; i++) {
-        if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+        if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
             for (size_t j = notes_len; j > notes_cursor; j--) {
                 notes_buf[j] = notes_buf[j - 1];
             }
@@ -8304,7 +8304,7 @@ static int docs_save(void) {
 }
 
 static int docs_export(void) {
-    static uint8_t out[PRISM_VFS_MAX_FILE_SIZE];
+    static uint8_t out[PRISM_VFS_MAX_APP_FILE_SIZE];
     int n = docx_export(docs_doc.buf, docs_doc.len, out, sizeof(out));
     if (n < 0) {
         serial_write_line("docs: export failed (too big for the file limit)");
@@ -8328,7 +8328,7 @@ static int docs_import(void) {
         serial_write_line("docs: import failed (no doc.docx)");
         return -1;
     }
-    static char text[PRISM_VFS_MAX_FILE_SIZE];
+    static char text[PRISM_VFS_MAX_APP_FILE_SIZE];
     int n = docx_import((const uint8_t *)content, len, text,
                         sizeof(text));
     if (n < 0) {
@@ -8574,7 +8574,7 @@ static char slides_edit[SLIDES_LINE_MAX + 1];
 static int slides_edit_len;
 static int slides_show;
 static char slides_status[96];
-static char slides_io_buf[PRISM_VFS_MAX_FILE_SIZE];
+static char slides_io_buf[PRISM_VFS_MAX_APP_FILE_SIZE];
 
 static void slides_load(void) {
     if (slides_loaded) {
@@ -11387,7 +11387,7 @@ static char sheet_edit[SHEET_CELL_MAX + 1];
 static int sheet_edit_len;
 static int sheet_editing;
 static int sheet_loaded;
-static char sheet_io_buf[PRISM_VFS_MAX_FILE_SIZE];
+static char sheet_io_buf[PRISM_VFS_MAX_APP_FILE_SIZE];
 
 /* Sheet の検索置換 (Ctrl+F)。2 段階の入力行を使う。 */
 static int sheet_fr_stage; /* 0 = off, 1 = find, 2 = replace */
@@ -13257,7 +13257,7 @@ static void mail_send_from_app(void) {
     mail_body[mail_body_len] = '\0';
     mail_attach att;
     const mail_attach *attp = NULL;
-    static uint8_t att_data[PRISM_VFS_MAX_FILE_SIZE];
+    static uint8_t att_data[PRISM_VFS_MAX_APP_FILE_SIZE];
     if (mail_attach_name[0] != '\0') {
         size_t alen = 0;
         const char *adata = vfs_read_ptr(mail_attach_name, &alen);
@@ -13275,7 +13275,7 @@ static void mail_send_from_app(void) {
         att.len = alen;
         attp = &att;
     }
-    static char built[PRISM_VFS_MAX_FILE_SIZE];
+    static char built[PRISM_VFS_MAX_APP_FILE_SIZE];
     int blen = 0;
     if (mail_smtp_send_att(&cfg, mail_to, mail_subject,
                            mail_body, attp, built,
@@ -13463,7 +13463,7 @@ static void draw_mail(void) {
         const char *raw_content = vfs_read_ptr(name, &len);
         /* Show the decoded view: RFC 2047 headers and the
          * text body (MIME-aware), not the raw source. */
-        static char view_text[PRISM_VFS_MAX_FILE_SIZE + 512];
+        static char view_text[PRISM_VFS_MAX_APP_FILE_SIZE + 512];
         const char *content = raw_content;
         if (raw_content != NULL) {
             size_t p = 0;
@@ -13992,7 +13992,7 @@ static int contacts_handle_key(int c) {
 
 /* --- Editor: 任意ファイルのテキスト編集 --- */
 static char editor_name[32] = "edit.txt";
-static char editor_buf[PRISM_VFS_MAX_FILE_SIZE + 1];
+static char editor_buf[PRISM_VFS_MAX_APP_FILE_SIZE + 1];
 static size_t editor_len;
 static int editor_loaded;
 static int editor_stage; /* 0 編集, 1 ファイル名入力 */
@@ -14004,8 +14004,8 @@ static void editor_load(void) {
     const char *text = vfs_read_ptr(editor_name, &len);
     editor_len = 0;
     if (text != NULL) {
-        if (len > PRISM_VFS_MAX_FILE_SIZE) {
-            len = PRISM_VFS_MAX_FILE_SIZE;
+        if (len > PRISM_VFS_MAX_APP_FILE_SIZE) {
+            len = PRISM_VFS_MAX_APP_FILE_SIZE;
         }
         memcpy(editor_buf, text, len);
         editor_len = len;
@@ -14017,12 +14017,12 @@ static void editor_load(void) {
 /* Editor の取り消し (Notes と同じ考え方)。 */
 #define EDITOR_UNDO_DEPTH 8
 static char editor_undo_bufs[EDITOR_UNDO_DEPTH]
-                            [PRISM_VFS_MAX_FILE_SIZE + 1];
+                            [PRISM_VFS_MAX_APP_FILE_SIZE + 1];
 static size_t editor_undo_lens[EDITOR_UNDO_DEPTH];
 static int editor_undo_count;
 static int editor_undo_group;
 static int editor_undo_run;
-static char editor_redo_buf[PRISM_VFS_MAX_FILE_SIZE + 1];
+static char editor_redo_buf[PRISM_VFS_MAX_APP_FILE_SIZE + 1];
 static size_t editor_redo_len;
 static int editor_redo_valid;
 
@@ -14043,7 +14043,7 @@ static void editor_undo_push(int group) {
     if (editor_undo_count == EDITOR_UNDO_DEPTH) {
         for (int i = 1; i < EDITOR_UNDO_DEPTH; i++) {
             memcpy(editor_undo_bufs[i - 1], editor_undo_bufs[i],
-                   PRISM_VFS_MAX_FILE_SIZE + 1);
+                   PRISM_VFS_MAX_APP_FILE_SIZE + 1);
             editor_undo_lens[i - 1] = editor_undo_lens[i];
         }
         editor_undo_count--;
@@ -14084,7 +14084,7 @@ static void editor_redo_apply(void) {
     if (editor_undo_count == EDITOR_UNDO_DEPTH) {
         for (int i = 1; i < EDITOR_UNDO_DEPTH; i++) {
             memcpy(editor_undo_bufs[i - 1], editor_undo_bufs[i],
-                   PRISM_VFS_MAX_FILE_SIZE + 1);
+                   PRISM_VFS_MAX_APP_FILE_SIZE + 1);
             editor_undo_lens[i - 1] = editor_undo_lens[i];
         }
         editor_undo_count--;
@@ -16123,7 +16123,7 @@ static int win_key(int kind, int c) {
             size_t n = 0;
             const char *clip = desktop_clipboard_get(&n);
             for (size_t i = 0; i < n; i++) {
-                if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+                if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
                     /* insert at cursor */
                     for (size_t j = notes_len; j > notes_cursor; j--) {
                         notes_buf[j] = notes_buf[j - 1];
@@ -16151,7 +16151,7 @@ static int win_key(int kind, int c) {
             return 1;
         }
         if (c >= 32 && c < 127) {
-            if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+            if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
                 for (size_t j = notes_len; j > notes_cursor; j--) {
                     notes_buf[j] = notes_buf[j - 1];
                 }
@@ -16164,7 +16164,7 @@ static int win_key(int kind, int c) {
             return 1;
         }
         if (c == '\n' || c == '\r') {
-            if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+            if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
                 for (size_t j = notes_len; j > notes_cursor; j--) {
                     notes_buf[j] = notes_buf[j - 1];
                 }
@@ -18749,15 +18749,23 @@ static void mail_insert_text(const char *text) {
 }
 
 /* ---- スクリーンショット ----
- * Ctrl+U で現在の画面を BMP に保存する。VFS の
- * ファイル上限 (16KB) に収めるため、144x90 の
- * 256色パレット BMP (3-3-2) に縮小して保存する。 */
-#define SHOT_W 144
-#define SHOT_H 90
-static uint8_t shot_buf[14 + 40 + 1024 + SHOT_W * SHOT_H];
+ * Ctrl+U で現在の画面を 24 ビット BMP (原寸) に保存する。
+ * 1280x800 なら 54 + 1280*800*3 = 3072054 バイト。
+ * VFS と diskfs は版5 で 4MB まで扱える。 */
+#define SHOT_MAX_W 1280
+#define SHOT_MAX_H 800
+#define SHOT_BUF_SIZE (54 + (size_t)SHOT_MAX_W * SHOT_MAX_H * 3)
+static uint8_t shot_buf[SHOT_BUF_SIZE];
 
 static void desktop_screenshot(void) {
     if (!fb_ready()) {
+        return;
+    }
+    uint64_t fw = fb_width();
+    uint64_t fh = fb_height();
+    if (fw == 0 || fh == 0 || fw > SHOT_MAX_W || fh > SHOT_MAX_H) {
+        desktop_notify(L("Screenshot too large",
+                         "画面が大きすぎて保存できません"));
         return;
     }
     char name[16];
@@ -18790,46 +18798,43 @@ static void desktop_screenshot(void) {
             return;
         }
     }
+    /* BMP (24 ビット、パレット無し、行は 4 バイト境界)。 */
+    uint32_t stride = (uint32_t)((fw * 3 + 3) & ~(uint64_t)3);
+    uint32_t total = 54 + stride * (uint32_t)fh;
     uint8_t *b = shot_buf;
-    for (size_t i = 0; i < sizeof(shot_buf); i++) {
+    for (size_t i = 0; i < total; i++) {
         b[i] = 0;
     }
-    uint32_t total = (uint32_t)sizeof(shot_buf);
     b[0] = 'B';
     b[1] = 'M';
     b[2] = (uint8_t)total;
     b[3] = (uint8_t)(total >> 8);
     b[4] = (uint8_t)(total >> 16);
-    b[10] = (uint8_t)(14 + 40 + 1024);
-    b[11] = (uint8_t)((14 + 40 + 1024) >> 8);
-    b[14] = 40;
-    b[18] = SHOT_W;
-    b[22] = SHOT_H;
-    b[26] = 1;
-    b[28] = 8; /* 8bpp palette */
-    /* パレット (3-3-2): B,G,R,0 の順。 */
-    for (int i = 0; i < 256; i++) {
-        int r3 = (i >> 5) & 7;
-        int g3 = (i >> 2) & 7;
-        int b2 = i & 3;
-        b[54 + i * 4 + 0] = (uint8_t)(b2 * 255 / 3);
-        b[54 + i * 4 + 1] = (uint8_t)(g3 * 255 / 7);
-        b[54 + i * 4 + 2] = (uint8_t)(r3 * 255 / 7);
-    }
-    uint64_t fw = fb_width();
-    uint64_t fh = fb_height();
-    for (int y = 0; y < SHOT_H; y++) {
-        int sy = (int)((uint64_t)(SHOT_H - 1 - y) * fh / SHOT_H);
-        for (int x = 0; x < SHOT_W; x++) {
-            int sx = (int)((uint64_t)x * fw / SHOT_W);
-            uint32_t rgb = fb_get_pixel_rgb((uint64_t)sx,
-                                            (uint64_t)sy);
-            int r = (int)((rgb >> 16) & 0xFF);
-            int g = (int)((rgb >> 8) & 0xFF);
-            int bl = (int)(rgb & 0xFF);
-            b[1078 + y * SHOT_W + x] =
-                (uint8_t)(((r >> 5) << 5) | ((g >> 5) << 2) |
-                          (bl >> 6));
+    b[5] = (uint8_t)(total >> 24);
+    b[10] = 54; /* データ開始 */
+    b[14] = 40; /* BITMAPINFOHEADER */
+    b[18] = (uint8_t)fw;
+    b[19] = (uint8_t)(fw >> 8);
+    b[20] = (uint8_t)(fw >> 16);
+    b[21] = (uint8_t)(fw >> 24);
+    b[22] = (uint8_t)fh;
+    b[23] = (uint8_t)(fh >> 8);
+    b[24] = (uint8_t)(fh >> 16);
+    b[25] = (uint8_t)(fh >> 24);
+    b[26] = 1;  /* プレーン数 */
+    b[28] = 24; /* 24bpp */
+    b[34] = (uint8_t)(stride * (uint32_t)fh);
+    b[35] = (uint8_t)((stride * (uint32_t)fh) >> 8);
+    b[36] = (uint8_t)((stride * (uint32_t)fh) >> 16);
+    b[37] = (uint8_t)((stride * (uint32_t)fh) >> 24);
+    for (uint64_t y = 0; y < fh; y++) {
+        uint64_t sy = fh - 1 - y; /* BMP は下から上へ */
+        for (uint64_t x = 0; x < fw; x++) {
+            uint32_t rgb = fb_get_pixel_rgb(x, sy);
+            size_t off = 54 + (size_t)y * stride + (size_t)x * 3;
+            b[off + 0] = (uint8_t)(rgb & 0xFF);        /* B */
+            b[off + 1] = (uint8_t)((rgb >> 8) & 0xFF);  /* G */
+            b[off + 2] = (uint8_t)((rgb >> 16) & 0xFF); /* R */
         }
     }
     if (vfs_write(name, (const char *)b, total) == 0) {
@@ -19061,7 +19066,7 @@ static int desktop_handle_key_inner(int c) {
             size_t n = 0;
             const char *clip = desktop_clipboard_get(&n);
             for (size_t i = 0; i < n; i++) {
-                if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+                if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
                     for (size_t j = notes_len; j > notes_cursor; j--) {
                         notes_buf[j] = notes_buf[j - 1];
                     }
@@ -20696,7 +20701,7 @@ static int desktop_handle_key_inner(int c) {
             return 1;
         }
         if (c == '\n' || c == '\r') {
-            if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+            if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
                 notes_undo_push(1);
                 for (size_t i = notes_len; i > notes_cursor; i--) {
                     notes_buf[i] = notes_buf[i - 1];
@@ -20712,7 +20717,7 @@ static int desktop_handle_key_inner(int c) {
             return 1;
         }
         if (c >= 32 && c <= 126) {
-            if (notes_len + 1 < PRISM_VFS_MAX_FILE_SIZE) {
+            if (notes_len + 1 < PRISM_VFS_MAX_APP_FILE_SIZE) {
                 notes_undo_push(1);
                 for (size_t i = notes_len; i > notes_cursor; i--) {
                     notes_buf[i] = notes_buf[i - 1];

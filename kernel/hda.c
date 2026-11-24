@@ -2,6 +2,7 @@
 
 #include "hda.h"
 
+#include "hda_cap.h"
 #include "paging.h"
 #include "pci.h"
 #include "pmm.h"
@@ -48,9 +49,8 @@ static int hda_mic_pin_nid;
 static uint64_t hda_cap_bdl_phys;
 static uint64_t hda_cap_pcm_phys;
 static uint64_t hda_cap_play_bdl_phys;
-#define HDA_CAP_ENTRIES 36
-#define HDA_CAP_ENTRY_BYTES 16384
-#define HDA_CAP_BYTES (HDA_CAP_ENTRIES * HDA_CAP_ENTRY_BYTES)
+
+/* 採取バッファの大きさは kernel/hda_cap.h (HDA_CAP_BYTES)。 */
 
 static uint16_t reg16(uint32_t off) {
     return *(volatile uint16_t *)(hda_regs + off);
@@ -405,17 +405,7 @@ static int hda_capture_alloc(void) {
     }
     uint32_t *bdl =
         (uint32_t *)(uintptr_t)(hda_cap_bdl_phys + hda_hhdm);
-    for (int i = 0; i < 256; i++) {
-        bdl[i] = 0;
-    }
-    for (int e = 0; e < HDA_CAP_ENTRIES; e++) {
-        uint64_t p = hda_cap_pcm_phys +
-                     (uint64_t)e * HDA_CAP_ENTRY_BYTES;
-        bdl[e * 4 + 0] = (uint32_t)(p & 0xFFFFFFFFu);
-        bdl[e * 4 + 1] = (uint32_t)(p >> 32);
-        bdl[e * 4 + 2] = HDA_CAP_ENTRY_BYTES;
-        bdl[e * 4 + 3] = 0; /* IOC なし (LPIB をポーリング) */
-    }
+    hda_cap_build_bdl(bdl, hda_cap_pcm_phys);
     return 0;
 }
 
@@ -428,7 +418,7 @@ const int16_t *hda_capture_data(void) {
 }
 
 int hda_capture_load(const int16_t *src, uint32_t bytes) {
-    if (src == NULL || bytes > HDA_CAP_BYTES ||
+    if (hda_cap_load_ok(src, bytes) != 0 ||
         hda_capture_alloc() != 0) {
         return -1;
     }
@@ -466,11 +456,7 @@ int hda_record(uint32_t millis, uint32_t *bytes_out,
     if (millis == 0 || millis > 3000) {
         millis = 2000;
     }
-    uint32_t target = 48000u * 4u * millis / 1000u;
-    if (target > HDA_CAP_BYTES) {
-        target = HDA_CAP_BYTES;
-    }
-    target &= ~3u;
+    uint32_t target = hda_cap_target_bytes(millis);
 
     /* ADC 側の設定: 電源 D0、ピンの入力有効化、接続選択、
      * ストリーム ID (タグ 2)、書式。 */
@@ -528,21 +514,9 @@ int hda_record(uint32_t millis, uint32_t *bytes_out,
     }
     reg32w(base + HDA_SD_CTL, 0); /* 停止 */
 
-    uint32_t got = max_pos < target ? max_pos : target;
-    got &= ~3u;
+    uint32_t got = hda_cap_got_bytes(max_pos, target);
     const int16_t *pcm = hda_capture_data();
-    uint32_t peak = 0;
-    if (pcm != NULL) {
-        for (uint32_t i = 0; i < got / 2; i++) {
-            int v = pcm[i];
-            if (v < 0) {
-                v = -v;
-            }
-            if ((uint32_t)v > peak) {
-                peak = (uint32_t)v;
-            }
-        }
-    }
+    uint32_t peak = hda_cap_peak(pcm, got / 2);
     if (bytes_out != NULL) {
         *bytes_out = got;
     }

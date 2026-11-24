@@ -311,7 +311,7 @@ static void do_prev_repair(void) {
     serial_write_line(m.version);
     int checked = 0;
     int repaired = 0;
-    static uint8_t file_buf[DISKFS_MAX_FILE_SIZE];
+    static uint8_t file_buf[DISKFS_SMALL_FILE_SIZE];
     for (int i = 0; i < m.file_count; i++) {
         const char *name = m.files[i].name;
         /* 組み込みファイルだけが修復の対象。 */

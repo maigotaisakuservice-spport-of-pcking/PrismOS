@@ -19,22 +19,37 @@ static uintptr_t heap_end;
 static uint64_t heap_offset; /* 物理 -> 仮想のオフセット */
 static block_t *heap_first;
 static int heap_ready;
+static size_t heap_pages; /* 実際に確保できたページ数 */
 
 static size_t align_up_size(size_t v, size_t a) {
     return (v + a - 1) & ~(a - 1);
 }
 
 void heap_init(uint64_t phys_to_virt_offset) {
-    uint64_t phys = pmm_alloc_pages(HEAP_PAGES);
+    /* 大きなファイルを載せるため 8MB を試し、取れなければ
+     * 4MB、2MB へ落とす (起動直後は空きが多く、通常は 8MB
+     * が取れる)。 */
+    static const size_t tries[] = { HEAP_PAGES, 1024, 512 };
+    uint64_t phys = 0;
+    size_t pages = 0;
+    for (size_t i = 0; i < sizeof(tries) / sizeof(tries[0]); i++) {
+        phys = pmm_alloc_pages(tries[i]);
+        if (phys != 0) {
+            pages = tries[i];
+            break;
+        }
+    }
     if (phys == 0) {
         heap_ready = 0;
+        heap_pages = 0;
         return;
     }
+    heap_pages = pages;
     heap_offset = phys_to_virt_offset;
     heap_start = (uintptr_t)(phys + heap_offset);
-    heap_end = heap_start + (uintptr_t)HEAP_PAGES * PMM_PAGE_SIZE;
+    heap_end = heap_start + (uintptr_t)heap_pages * PMM_PAGE_SIZE;
     heap_first = (block_t *)heap_start;
-    heap_first->size = (size_t)HEAP_PAGES * PMM_PAGE_SIZE - BLOCK_HDR_SIZE;
+    heap_first->size = (size_t)heap_pages * PMM_PAGE_SIZE - BLOCK_HDR_SIZE;
     heap_first->free = 1;
     heap_first->next = NULL;
     heap_ready = 1;
@@ -48,7 +63,7 @@ size_t heap_total_bytes(void) {
     if (!heap_ready) {
         return 0;
     }
-    return (size_t)HEAP_PAGES * PMM_PAGE_SIZE;
+    return heap_pages * PMM_PAGE_SIZE;
 }
 
 size_t heap_free_bytes(void) {

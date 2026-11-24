@@ -21,8 +21,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HEAP_PAGES 512 /* 512 ページ = 2MB。VFS の全ファイル (64 件 x 16KB)
-                       * とシェルの出力バッファが同時に載る大きさ。 */
+#define HEAP_PAGES 2048 /* 2048 ページ = 8MB。VFS の全ファイル
+                        * (128 件、うち大きなファイル 4MB 級) と
+                        * シェルの出力バッファが同時に載る大きさ。
+                        * 連続 2048 ページが取れなければ
+                        * heap_init() が 1024、512 へ落とす。 */
 
 void heap_init(uint64_t phys_to_virt_offset);
 void *kmalloc(size_t size);

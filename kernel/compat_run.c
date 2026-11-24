@@ -11,6 +11,7 @@
 #include "compat_run.h"
 
 #include "../shell/compat.h"
+#include "../shell/macho.h"
 #include "../shell/pe.h"
 #include "../shell/vfs.h"
 #include "desktop.h"
@@ -894,6 +895,14 @@ static uint32_t pe_tick_ms(void) {
     return rtc_to_unix(&t) * 1000u;
 }
 
+static uint64_t pe_unix_time(void) {
+    prism_rtc_time t;
+    if (rtc_read(&t) != 0) {
+        return 0;
+    }
+    return (uint64_t)rtc_to_unix(&t);
+}
+
 static void pe_sleep_ms(uint32_t ms) {
     /* 概算のビジーウェイト (Sleep のための実用上の待ち)。
      * 秒単位は RTC で待ち、端数は pause ループで待つ。 */
@@ -1152,6 +1161,8 @@ static int run_pe(const char *name, const uint8_t *data, size_t len,
     pio.sleep_ms = pe_sleep_ms;
     pio.tick_ms = pe_tick_ms;
     pio.cmdline_va = cmdline_va;
+    pio.image_name = name;
+    pio.unix_time = pe_unix_time;
     pe_set_context(&info, &pio, &img);
     compat_guest_cr3 = pml4;
     compat_guest_active = 1;
@@ -1186,11 +1197,191 @@ static int run_pe(const char *name, const uint8_t *data, size_t len,
     return 0;
 }
 
+/* ---- Mach-O ゲスト ----
+ *
+ * ELF と同じサンドボックスに Mach-O を載せる。セグメントを
+ * その vmaddr に張り、LC_MAIN (無ければ LC_UNIXTHREAD) の
+ * 入口から走らせる。ゲストは PrismOS の互換呼び出し
+ * (int $0x80) を直接使う。dyld を要するものは macho_parse
+ * の時点で断ってある。 */
+static int run_macho(const char *name, const uint8_t *data,
+                     size_t len, const char *const *args,
+                     int nargs, int *exit_code) {
+    (void)args;
+    (void)nargs;
+    macho_info info;
+    int rc = macho_parse(data, len, &info);
+    if (rc != 0) {
+        serial_write("run: ");
+        serial_write(name);
+        serial_write(": ");
+        serial_write_line(macho_error(rc));
+        return -2;
+    }
+    /* セグメントはユーザー空間の低い方に収まること。 */
+    uint64_t top = 0;
+    for (int i = 0; i < info.seg_count; i++) {
+        const macho_segment *s = &info.segs[i];
+        if (s->vmaddr < 0x10000 ||
+            s->vmaddr + s->vmsize > GUEST_STUB_VA ||
+            s->vmaddr + s->vmsize < s->vmaddr) {
+            serial_write_line(
+                "run: Mach-O segment outside user space");
+            return -2;
+        }
+        if (s->vmaddr + s->vmsize > top) {
+            top = s->vmaddr + s->vmsize;
+        }
+    }
+    uint64_t pml4 = sandbox_create();
+    if (pml4 == 0) {
+        return -3;
+    }
+    compat_image img;
+    img_init(&img);
+    img.base = info.image_base;
+    img.entry = info.entry;
+    int fail = 0;
+    for (int i = 0; i < info.seg_count && !fail; i++) {
+        const macho_segment *s = &info.segs[i];
+        uint64_t first = s->vmaddr & ~0xFFFULL;
+        uint64_t last =
+            (s->vmaddr + s->vmsize + 0xFFFULL) & ~0xFFFULL;
+        int writable = (s->initprot & 2) != 0;
+        int executable = (s->initprot & 4) != 0;
+        for (uint64_t p = first; p < last && !fail; p += 4096) {
+            fail = sandbox_map_new(pml4, p, writable, executable,
+                                   NULL) != 0;
+        }
+        if (!fail && s->filesize > 0) {
+            fail = guest_copy_in(pml4, s->vmaddr,
+                                 data + s->fileoff,
+                                 (size_t)s->filesize) != 0;
+        }
+        if (!fail && img.seg_count < COMPAT_MAX_SEGMENTS) {
+            int slot = img.seg_count++;
+            img.seg_base[slot] = (uint8_t *)(uintptr_t)s->vmaddr;
+            img.seg_vaddr[slot] = s->vmaddr;
+            img.seg_memsz[slot] = last - first;
+        }
+    }
+    /* brk 領域 (ヒープ用)。 */
+    uint64_t brk_va = (top + 0xFFFULL) & ~0xFFFULL;
+    if (!fail && brk_va + COMPAT_BRK_SIZE > GUEST_STUB_VA) {
+        serial_write_line("run: image collides with the stub area");
+        fail = 1;
+    }
+    for (uint64_t p = 0; p < COMPAT_BRK_SIZE && !fail; p += 4096) {
+        fail = sandbox_map_new(pml4, brk_va + p, 1, 0, NULL) != 0;
+    }
+    if (!fail) {
+        img.brk_base = (uint8_t *)(uintptr_t)brk_va;
+        img.brk_cur = brk_va;
+    }
+    /* 終了スタブ (入口が ret したら exit する)。 */
+    if (!fail) {
+        static const uint8_t exit_stub[] = {
+            0xB8, 0x00, 0x00, 0x00, 0x00, /* mov eax, 0 (exit) */
+            0x31, 0xFF,                   /* xor edi, edi */
+            0xCD, 0x80,                   /* int 0x80 */
+            0xF4                          /* hlt */
+        };
+        fail = sandbox_map_new(pml4, GUEST_STUB_VA, 0, 1,
+                               NULL) != 0 ||
+               guest_copy_in(pml4, GUEST_STUB_VA, exit_stub,
+                             sizeof(exit_stub)) != 0;
+    }
+    /* スタック。 */
+    uint64_t stack_phys = 0;
+    if (!fail) {
+        stack_phys = pmm_alloc_pages(COMPAT_STACK_SIZE / 4096);
+        if (stack_phys == 0) {
+            fail = 1;
+        }
+    }
+    for (uint64_t p = 0; p < COMPAT_STACK_SIZE && !fail;
+         p += 4096) {
+        fail = sandbox_map(pml4, GUEST_STACK_VA + p,
+                           stack_phys + p, 1, 0) != 0;
+    }
+    if (fail) {
+        sandbox_destroy(pml4);
+        serial_write_line("run: out of memory");
+        return -3;
+    }
+    uint8_t *stack_alias =
+        (uint8_t *)(uintptr_t)(stack_phys + g_hhdm_offset);
+    /* 戻り先 = 終了スタブ (入口が ret したら exit する)。 */
+    uint64_t stub_va = GUEST_STUB_VA;
+    memcpy(stack_alias + COMPAT_STACK_SIZE - 8, &stub_va, 8);
+    uint64_t sp_guest = GUEST_STACK_VA + COMPAT_STACK_SIZE - 8;
+    compat_set_context(&g_kernel_io, &img, kmalloc, kfree);
+    compat_set_ranges(&img, (const uint8_t *)(uintptr_t)GUEST_STACK_VA,
+                      COMPAT_STACK_SIZE);
+    compat_reset_state();
+    compat_ext_reset();
+    compat_guest_cr3 = pml4;
+    compat_guest_active = 1;
+    sandbox_watchdog_start();
+    int code = compat_call_entry(img.entry, sp_guest);
+    sandbox_watchdog_stop();
+    compat_guest_active = 0;
+    compat_guest_cr3 = 0;
+    compat_clear_ranges();
+    compat_set_context(NULL, NULL, NULL, NULL);
+    sandbox_destroy(pml4);
+    if (!compat_exit_pending) {
+        if (code == COMPAT_KILL_WATCHDOG) {
+            serial_write("run: ");
+            serial_write(name);
+            serial_write_line(
+                ": guest killed (time limit, sandbox)");
+        } else {
+            serial_write("run: ");
+            serial_write(name);
+            serial_write_line(": guest killed (fault, sandbox)");
+        }
+        if (exit_code != NULL) {
+            *exit_code = code;
+        }
+        return -4;
+    }
+    if (exit_code != NULL) {
+        *exit_code = compat_exit_code;
+    }
+    return 0;
+}
+
 int compat_run_file(const char *name, const char *const *args, int nargs,
                     int *exit_code) {
     size_t len = 0;
     const char *data = vfs_read_ptr(name, &len);
     if (data == NULL) {
+        /* .app バンドル: 中の実行ファイルを探す。 */
+        size_t nlen = strlen(name);
+        if (nlen > 4 && strcmp(name + nlen - 4, ".app") == 0) {
+            char inner[128];
+            size_t base_len = nlen - 4;
+            if (nlen + 32 < sizeof(inner)) {
+                size_t p = 0;
+                for (size_t i = 0; i < nlen; i++) {
+                    inner[p++] = name[i];
+                }
+                const char *tail = "/Contents/MacOS/";
+                for (size_t i = 0; tail[i] != '\0'; i++) {
+                    inner[p++] = tail[i];
+                }
+                for (size_t i = 0; i < base_len; i++) {
+                    inner[p++] = name[i];
+                }
+                inner[p] = '\0';
+                data = vfs_read_ptr(inner, &len);
+                if (data != NULL) {
+                    return compat_run_file(inner, args, nargs,
+                                           exit_code);
+                }
+            }
+        }
         serial_write("run: ");
         serial_write(name);
         serial_write_line(": No such file");
@@ -1199,6 +1390,12 @@ int compat_run_file(const char *name, const char *const *args, int nargs,
     if (len >= 2 && data[0] == 'M' && data[1] == 'Z') {
         return run_pe(name, (const uint8_t *)data, len, args,
                       nargs, exit_code);
+    }
+    if (len >= 4 && (uint8_t)data[0] == 0xCF &&
+        (uint8_t)data[1] == 0xFA && (uint8_t)data[2] == 0xED &&
+        (uint8_t)data[3] == 0xFE) {
+        return run_macho(name, (const uint8_t *)data, len, args,
+                         nargs, exit_code);
     }
     compat_elf_info info;
     int rc = compat_elf_parse((const uint8_t *)data, len, &info);
@@ -1285,6 +1482,66 @@ int compat_info_file(const char *name, char *out, size_t out_cap) {
     const char *data = vfs_read_ptr(name, &len);
     if (data == NULL) {
         return -1;
+    }
+    if (len >= 4 && (uint8_t)data[0] == 0xCF &&
+        (uint8_t)data[1] == 0xFA && (uint8_t)data[2] == 0xED &&
+        (uint8_t)data[3] == 0xFE) {
+        macho_info minfo;
+        if (macho_parse((const uint8_t *)data, len, &minfo) != 0) {
+            return -2;
+        }
+        size_t pos = 0;
+        const char *head = "Mach-O 64-bit x86-64, type EXECUTE, "
+                           "entry 0x";
+        while (*head != '\0' && pos + 1 < out_cap) {
+            out[pos++] = *head++;
+        }
+        char hex[17];
+        int n = 0;
+        uint64_t v = minfo.entry;
+        if (v == 0) {
+            hex[n++] = '0';
+        } else {
+            char rev[16];
+            int r = 0;
+            while (v > 0) {
+                rev[r++] = "0123456789abcdef"[v & 0xF];
+                v >>= 4;
+            }
+            while (r > 0) {
+                hex[n++] = rev[--r];
+            }
+        }
+        hex[n] = '\0';
+        for (int i = 0; hex[i] != '\0' && pos + 1 < out_cap; i++) {
+            out[pos++] = hex[i];
+        }
+        const char *tail = ", segments: ";
+        while (*tail != '\0' && pos + 1 < out_cap) {
+            out[pos++] = *tail++;
+        }
+        char num[4];
+        n = 0;
+        int sv = minfo.seg_count;
+        if (sv == 0) {
+            num[n++] = '0';
+        } else {
+            char rev[4];
+            int r = 0;
+            while (sv > 0) {
+                rev[r++] = (char)('0' + (sv % 10));
+                sv /= 10;
+            }
+            while (r > 0) {
+                num[n++] = rev[--r];
+            }
+        }
+        num[n] = '\0';
+        for (int i = 0; num[i] != '\0' && pos + 1 < out_cap; i++) {
+            out[pos++] = num[i];
+        }
+        out[pos] = '\0';
+        return 0;
     }
     compat_elf_info info;
     int rc = compat_elf_parse((const uint8_t *)data, len, &info);
@@ -1421,6 +1678,13 @@ int compat_is_app(const char *name) {
     if (n < 4) {
         return 0;
     }
-    return strcmp(name + n - 4, ".elf") == 0 ||
-           strcmp(name + n - 4, ".exe") == 0;
+    if (strcmp(name + n - 4, ".elf") == 0 ||
+        strcmp(name + n - 4, ".exe") == 0 ||
+        strcmp(name + n - 4, ".app") == 0) {
+        return 1;
+    }
+    if (n >= 6 && strcmp(name + n - 6, ".macho") == 0) {
+        return 1;
+    }
+    return 0;
 }

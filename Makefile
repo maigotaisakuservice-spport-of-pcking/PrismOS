@@ -84,10 +84,11 @@ KERNEL_C_SRCS := kernel/main.c kernel/serial.c kernel/string.c \
                  shell/inflate.c shell/zip.c shell/docx.c \
                  shell/slides.c shell/deflate.c shell/pptx.c shell/xml.c \
                  kernel/security.c kernel/entropy_hw.c \
-                 shell/compat.c shell/pe.c kernel/compat_run.c \
+                 shell/compat.c shell/pe.c shell/macho.c \
+                 kernel/compat_run.c \
                  kernel/gdt.c kernel/sandbox.c \
                  shell/sha3.c shell/mlkem.c shell/mldsa.c \
-                 kernel/ahci.c kernel/virtio_blk.c kernel/virtio_net.c kernel/nvme.c kernel/block.c kernel/smp.c kernel/acpi.c kernel/hda.c kernel/sdhci.c kernel/vinput.c kernel/vbe.c \
+                 kernel/ahci.c kernel/virtio_blk.c kernel/virtio_net.c kernel/nvme.c kernel/block.c kernel/smp.c kernel/acpi.c kernel/hda.c kernel/hda_cap.c kernel/sdhci.c kernel/vinput.c kernel/vbe.c \
                  kernel/uhci.c kernel/ehci.c kernel/xhci.c kernel/uvc.c kernel/fat16.c kernel/jfont.c kernel/bio.c \
                  kernel/jfont_data.c kernel/tls.c kernel/drvload.c kernel/ime.c kernel/totp.c kernel/users.c kernel/store.c kernel/fde.c
 KERNEL_OBJS   := $(KERNEL_C_SRCS:%.c=$(BUILD)/obj/%.o) \
@@ -99,7 +100,7 @@ KERNEL_OBJS   := $(KERNEL_C_SRCS:%.c=$(BUILD)/obj/%.o) \
                  $(BUILD)/obj/kernel/wallpaper-img.o \
                  $(BUILD)/obj/kernel/logo-img.o
 
-.PHONY: all kernel iso test clock-test ping-test run boot-test boot-test-kbd desktop-test settings-gui-test wallpaper-test power-menu-test install-test installer-test login-test fde-test crypto-test net-test nvme-test boot-anim-test smp-test hda-test sdhci-test tablet-test res-test hub-test music-test video-audio-test recovery-test update-test kernel-update-test mail-test security-test compat-test compat-guests driver-test soak-test disk disk-boot-test live-usb live-usb-test vm-image vm-test kernel32 iso32 boot32-test arm-disk-test arm-users-test arm-net-test dualboot-disk dualboot-test dualboot-iso arm-check arm-kernel arm-boot-test store-test serve-test serve2-test xhci-test tcp6-test arm-totp-test net32-test gui32-test appguard-test users-rewrap-test dock-drop-test admin-destructive-test s3-mouse-test pe-guest check-asm clean distclean limine files-gui-test ime-apps-test undo-test notif-test settings-mouse-test widgets-test admin-gui-test apps-mgmt-test drag-test
+.PHONY: all kernel iso test clock-test ping-test run boot-test boot-test-kbd desktop-test settings-gui-test wallpaper-test power-menu-test install-test installer-test login-test fde-test crypto-test net-test nvme-test boot-anim-test smp-test hda-test hda-cap-test sdhci-test tablet-test res-test hub-test music-test video-audio-test recovery-test update-test kernel-update-test mail-test security-test compat-test compat-guests driver-test diskfs-test screenshot-test soak-test disk disk-boot-test live-usb live-usb-test vm-image vm-test kernel32 iso32 boot32-test arm-disk-test arm-users-test arm-net-test dualboot-disk dualboot-test dualboot-iso arm-check arm-kernel arm-boot-test store-test serve-test serve2-test xhci-test tcp6-test arm-totp-test net32-test gui32-test appguard-test users-rewrap-test dock-drop-test admin-destructive-test s3-mouse-test pe-guest check-asm clean distclean limine files-gui-test ime-apps-test undo-test notif-test settings-mouse-test widgets-test admin-gui-test apps-mgmt-test drag-test
 
 all: $(ISO)
 
@@ -265,6 +266,40 @@ $(BUILD)/test_persist: tests/test_persist.c shell/diskfs.c shell/diskfs.h \
 > @mkdir -p $(BUILD)
 > $(HOST_CC) -std=c11 -Wall -Wextra -Werror -I shell -I kernel -o $@ \
       tests/test_persist.c shell/diskfs.c kernel/account.c kernel/crypto.c
+
+# test_diskfs: diskfs 版5 (大きなファイル、移行、復元ポイント)。
+# (カーネルと同じ shell/diskfs.c)
+$(BUILD)/test_diskfs: tests/test_diskfs.c shell/diskfs.c shell/diskfs.h
+> @mkdir -p $(BUILD)
+> $(HOST_CC) -std=c11 -Wall -Wextra -Werror -I shell -I kernel -o $@ \
+      tests/test_diskfs.c shell/diskfs.c
+
+# test_hda_cap: HD Audio 録音の採取ロジック (BDL・目標・
+# 取得量・ピーク)。カーネルと同じ kernel/hda_cap.c。
+$(BUILD)/test_hda_cap: tests/test_hda_cap.c kernel/hda_cap.c kernel/hda_cap.h
+> @mkdir -p $(BUILD)
+> $(HOST_CC) -std=c11 -Wall -Wextra -Werror -I kernel -o $@ \
+      tests/test_hda_cap.c kernel/hda_cap.c
+
+# hda-cap-test: 上のホストテストを実行する。
+hda-cap-test: $(BUILD)/test_hda_cap
+> ./$(BUILD)/test_hda_cap
+
+# diskfs-test: diskfs 版5 のホストテストを実行する。
+diskfs-test: $(BUILD)/test_diskfs
+> ./$(BUILD)/test_diskfs
+
+# check_shot: QEMU で撮った shot.bmp をディスクイメージから
+# 読み、原寸 24 ビット BMP かを検査するホストツール。
+$(BUILD)/check_shot: tests/check_shot.c shell/diskfs.c shell/diskfs.h kernel/crypto.c kernel/crypto.h
+> @mkdir -p $(BUILD)
+> $(HOST_CC) -std=c11 -Wall -Wextra -Werror -I shell -I kernel -o $@ \
+      tests/check_shot.c shell/diskfs.c kernel/crypto.c
+
+# screenshot-test: デスクトップで Ctrl+U を押し、shot.bmp が
+# 原寸で保存されることを QEMU + ホスト検査で確かめる。
+screenshot-test: $(ISO) $(BUILD)/check_shot
+> python3 scripts/screenshot-test.py
 
 # test_security: セキュリティの純粋ロジック (KDF、監査ログ、
 # 許可リスト、PIN ポリシー、リモート操作、エントロピー)
@@ -528,6 +563,14 @@ $(BUILD)/test_pe: tests/test_pe.c shell/pe.c shell/pe.h \
       tests/test_pe.c shell/pe.c shell/compat.c shell/vfs.c \
       tests/stubs/stub_hw.c
 
+# test_macho: Mach-O パーサー。カーネルと同じ shell/macho.c
+# をホストで動かす。生成ゲストも読み込む。
+$(BUILD)/test_macho: tests/test_macho.c shell/macho.c shell/macho.h \
+                     shell/sample_macho.h
+> @mkdir -p $(BUILD)
+> $(HOST_CC) -std=c11 -Wall -Wextra -Werror -I shell -o $@ \
+      tests/test_macho.c shell/macho.c
+
 # test_uvc: UVC の記述子解析・Probe/Commit・フレーム組立。
 # カーネルと同じ kernel/uvc.c をホストで動かす。
 $(BUILD)/test_uvc: tests/test_uvc.c kernel/uvc.c kernel/uvc.h
@@ -561,11 +604,12 @@ $(BUILD)/test_fat16: tests/test_fat16.c kernel/fat16.c kernel/fat16.h \
 > $(HOST_CC) -std=c11 -Wall -Wextra -Werror -I kernel -o $@ \
       tests/test_fat16.c kernel/fat16.c kernel/string.c
 
-test: $(BUILD)/test_shell $(BUILD)/test_memory $(BUILD)/test_desktop $(BUILD)/test_persist $(BUILD)/test_net $(BUILD)/test_mouse $(BUILD)/test_crypto $(BUILD)/test_cards $(BUILD)/test_wav $(BUILD)/test_shooter $(BUILD)/test_snapshot $(BUILD)/test_update $(BUILD)/test_sheet $(BUILD)/test_video $(BUILD)/test_install $(BUILD)/test_mail $(BUILD)/test_doc $(BUILD)/test_inflate $(BUILD)/test_deflate $(BUILD)/test_zip $(BUILD)/test_docx $(BUILD)/test_slides $(BUILD)/test_pptx $(BUILD)/test_security $(BUILD)/test_compat $(BUILD)/test_pe $(BUILD)/test_uvc $(BUILD)/test_pqc $(BUILD)/test_drivers $(BUILD)/test_fat16 $(BUILD)/test_tls $(BUILD)/test_drvload $(BUILD)/test_ime $(BUILD)/test_mime $(BUILD)/test_totp $(BUILD)/test_users $(BUILD)/test_storepkg $(BUILD)/test_charset $(BUILD)/test_pdf $(BUILD)/test_png $(BUILD)/test_js $(BUILD)/test_fde
+test: $(BUILD)/test_shell $(BUILD)/test_memory $(BUILD)/test_desktop $(BUILD)/test_persist $(BUILD)/test_diskfs $(BUILD)/test_net $(BUILD)/test_mouse $(BUILD)/test_crypto $(BUILD)/test_cards $(BUILD)/test_wav $(BUILD)/test_shooter $(BUILD)/test_snapshot $(BUILD)/test_update $(BUILD)/test_sheet $(BUILD)/test_video $(BUILD)/test_install $(BUILD)/test_mail $(BUILD)/test_doc $(BUILD)/test_inflate $(BUILD)/test_deflate $(BUILD)/test_zip $(BUILD)/test_docx $(BUILD)/test_slides $(BUILD)/test_pptx $(BUILD)/test_security $(BUILD)/test_compat $(BUILD)/test_pe $(BUILD)/test_macho $(BUILD)/test_uvc $(BUILD)/test_pqc $(BUILD)/test_drivers $(BUILD)/test_fat16 $(BUILD)/test_tls $(BUILD)/test_drvload $(BUILD)/test_ime $(BUILD)/test_mime $(BUILD)/test_totp $(BUILD)/test_users $(BUILD)/test_storepkg $(BUILD)/test_charset $(BUILD)/test_pdf $(BUILD)/test_png $(BUILD)/test_js $(BUILD)/test_fde $(BUILD)/test_hda_cap
 > ./$(BUILD)/test_shell
 > ./$(BUILD)/test_memory
 > ./$(BUILD)/test_desktop
 > ./$(BUILD)/test_persist
+> ./$(BUILD)/test_diskfs
 > ./$(BUILD)/test_net
 > ./$(BUILD)/test_mouse
 > ./$(BUILD)/test_crypto
@@ -589,6 +633,7 @@ test: $(BUILD)/test_shell $(BUILD)/test_memory $(BUILD)/test_desktop $(BUILD)/te
 > ./$(BUILD)/test_compat
 > ./$(BUILD)/test_uvc
 > ./$(BUILD)/test_pe
+> ./$(BUILD)/test_macho
 > ./$(BUILD)/test_pqc
 > ./$(BUILD)/test_drivers
 > ./$(BUILD)/test_fat16
@@ -604,6 +649,7 @@ test: $(BUILD)/test_shell $(BUILD)/test_memory $(BUILD)/test_desktop $(BUILD)/te
 > ./$(BUILD)/test_png
 > ./$(BUILD)/test_js
 > ./$(BUILD)/test_fde
+> ./$(BUILD)/test_hda_cap
 
 # カーネルに SSE/MMX/x87 命令が無いことを確認する。起動時の CPU は
 # SSE を有効化していないため、1 つでもあると #UD で死ぬ。
@@ -992,7 +1038,8 @@ $(ARM_IMAGE): $(ARM_KERNEL)
 > $(ARM_OBJCOPY) -O binary $< $@
 > @ls -lh $@
 
-$(ARM_KERNEL): $(ARM_SRCS) kernel/arm/linker.ld
+$(ARM_KERNEL): $(ARM_SRCS) kernel/arm/linker.ld \
+      $(wildcard kernel/*.h shell/*.h kernel/arm/*.h)
 > @if [ -z "$(ARM_CC)" ] || ! command -v $(ARM_CC) >/dev/null 2>&1; then \
       echo "MISSING: AArch64 cross compiler がありません"; \
       exit 1; \

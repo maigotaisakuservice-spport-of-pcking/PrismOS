@@ -177,12 +177,32 @@ static int con_ready;
 static uint32_t con_bg(void) { return fb_rgb(11, 16, 38); }
 static uint32_t con_fg(void) { return fb_rgb(235, 240, 255); }
 
+/* 画面コンソールの再描画。壁紙の上に文字だけを載せる：
+ * 領域全体を背景色で塗りつぶすと壁紙のグラデーションと
+ * ひし形が消えてしまう (2026-11-24 に画面テストで発覚)
+ * ため、各行を文字セル単位で描き直す。行末まで空白で
+ * 埋めることで、スクロールで残った古い字も消える。 */
 static void con_redraw(void) {
-    fb_fill_rect(CON_X, CON_Y, CON_COLS * 9, CON_ROWS * 17, con_bg());
+    static char pad[CON_COLS + 1];
+    static int pad_ready = 0;
+    if (!pad_ready) {
+        for (int k = 0; k < CON_COLS; k++) {
+            pad[k] = ' ';
+        }
+        pad[CON_COLS] = '\0';
+        pad_ready = 1;
+    }
     for (int r = 0; r < CON_ROWS; r++) {
-        if (con_lines[r][0] != '\0') {
-            fb_draw_text(CON_X, CON_Y + (uint64_t)r * 17, con_lines[r],
-                         con_fg(), con_bg(), 1);
+        size_t len = 0;
+        while (con_lines[r][len] != '\0') {
+            len++;
+        }
+        fb_draw_text(CON_X, CON_Y + (uint64_t)r * 17, con_lines[r],
+                     con_fg(), con_bg(), 1);
+        if (len < (size_t)CON_COLS) {
+            fb_draw_text(CON_X + (uint64_t)len * 9,
+                         CON_Y + (uint64_t)r * 17,
+                         pad + len, con_fg(), con_bg(), 1);
         }
     }
 }
@@ -241,7 +261,8 @@ static void con_init(void) {
     con_col = 0;
     con_row = 0;
     con_ready = 1;
-    fb_fill_rect(CON_X, CON_Y, CON_COLS * 9, CON_ROWS * 17, con_bg());
+    /* ここで領域全体を背景色で塗ると壁紙が消えるため塗らない。
+     * 文字は con_putc がセル単位で背景つきで描く。 */
     arm_uart_set_console_sink(con_putc);
 }
 

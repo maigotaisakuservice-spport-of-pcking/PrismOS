@@ -2343,8 +2343,8 @@ static uint8_t pq_ct[MLKEM768_CT_LEN];
 static uint8_t pq_pk[MLDSA44_PK_LEN];
 static uint8_t pq_sk[MLDSA44_SK_LEN];
 static uint8_t pq_sig[MLDSA44_SIG_LEN];
-static uint8_t pq_data[PRISM_VFS_MAX_FILE_SIZE];
-static uint8_t pq_sealed[PRISM_VFS_MAX_FILE_SIZE + 64];
+static uint8_t pq_data[PRISM_VFS_MAX_APP_FILE_SIZE];
+static uint8_t pq_sealed[PRISM_VFS_MAX_APP_FILE_SIZE + 64];
 
 static void pq_derive_session(const uint8_t ss[MLKEM_SS_LEN]) {
     crypto_sha256_ctx h;
@@ -3955,7 +3955,7 @@ static void mail_flow(const char *line) {
             return;
         }
         {
-            static char built[PRISM_VFS_MAX_FILE_SIZE];
+            static char built[PRISM_VFS_MAX_APP_FILE_SIZE];
             int blen = 0;
             if (mail_smtp_send_att(&cfg, to, subject, p, NULL,
                                    built, sizeof(built),
@@ -4017,7 +4017,7 @@ static void mail_flow(const char *line) {
                 serial_write("Date: ");
                 serial_write_line(raw);
             }
-            static char body[PRISM_VFS_MAX_FILE_SIZE];
+            static char body[PRISM_VFS_MAX_APP_FILE_SIZE];
             int bn = mime_text_body(text, len, body,
                                     sizeof(body) - 1);
             if (bn >= 0) {
@@ -4703,7 +4703,7 @@ static int update_apply_manifest(const prism_settings *s,
         persist_maybe_sync();
     }
     /* ハッシュが違うファイルだけ取ってくる。 */
-    static uint8_t file_buf[DISKFS_MAX_FILE_SIZE];
+    static uint8_t file_buf[DISKFS_SMALL_FILE_SIZE];
     int downloaded = 0;
     int unchanged = 0;
     for (int i = 0; i < m->file_count; i++) {
@@ -4784,11 +4784,15 @@ failed:
     persist_maybe_sync();
     if (have_snap) {
         if (persist_snapshot_restore(snap_name) == 0) {
-            desktop_notify("Update failed: rolled back");
             persist_load();
             /* ログイン後の再読込は暗号文のまま載るので復号する
              * (鍵が無ければ何もしない)。 */
             persist_decrypt_loaded();
+            /* 通知は再読込の後に出す。desktop_notify は履歴の
+             * 保存で VFS をディスクへ同期するため、復元の直後・
+             * 再読込の前に呼ぶと、復元前の VFS がディスクへ
+             * 書き戻されて復元が打ち消されてしまう。 */
+            desktop_notify("Update failed: rolled back");
             serial_write_line("Rolled back to the restore point.");
         } else {
             serial_write_line("Rollback failed: restore point is broken.");
@@ -5030,12 +5034,54 @@ static void compat_flow(const char *line) {
     if (strcmp(arg, "list") == 0) {
         int count = vfs_file_count();
         int found = 0;
+        /* .app バンドルはファイルそのものではないので、バンドル内の
+         * 実行ファイルからバンドル名を出して一度だけ表示する。 */
+        char seen_app[8][64];
+        int seen_n = 0;
         for (int i = 0; i < count; i++) {
             const char *name = vfs_file_name(i);
-            if (name != NULL && compat_is_app(name)) {
+            if (name == NULL) {
+                continue;
+            }
+            if (compat_is_app(name)) {
                 serial_write_line(name);
                 found++;
+                continue;
             }
+            const char *marker = ".app/Contents/MacOS/";
+            const char *at = NULL;
+            for (const char *p = name; *p != '\0'; p++) {
+                size_t k = 0;
+                while (marker[k] != '\0' && p[k] == marker[k]) {
+                    k++;
+                }
+                if (marker[k] == '\0') {
+                    at = p;
+                    break;
+                }
+            }
+            if (at == NULL) {
+                continue;
+            }
+            size_t blen = (size_t)(at - name) + 4; /* ".app" まで */
+            if (blen + 1 > sizeof(seen_app[0]) || seen_n >= 8) {
+                continue;
+            }
+            int dup = 0;
+            for (int j = 0; j < seen_n; j++) {
+                if (strncmp(seen_app[j], name, blen) == 0 &&
+                    seen_app[j][blen] == '\0') {
+                    dup = 1;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+            memcpy(seen_app[seen_n], name, blen);
+            seen_app[seen_n][blen] = '\0';
+            seen_n++;
+            serial_write_line(seen_app[seen_n - 1]);
+            found++;
         }
         if (found == 0) {
             serial_write_line("No compat apps.");
@@ -6323,7 +6369,7 @@ static uint8_t store_pk[MLDSA44_PK_LEN];
 static uint8_t store_sk[MLDSA44_SK_LEN];
 static uint8_t store_sig[MLDSA44_SIG_LEN];
 static uint8_t store_pkg_buf[20480];
-static uint8_t store_payload_buf[PRISM_VFS_MAX_FILE_SIZE];
+static uint8_t store_payload_buf[PRISM_VFS_MAX_APP_FILE_SIZE];
 
 static int store_load_pub(void) {
     size_t len = 0;

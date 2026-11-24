@@ -384,6 +384,12 @@ static void persist_probe_diskfs(void) {
     if (fmt == 1) {
         disk_installed = 1;
         serial_write_line("[boot] disk: installed system found");
+        /* 版4 のディスクは版5 へ移行する (版番号だけの変更で、
+         * ファイルも復元ポイントもそのまま)。版5 の場合は
+         * -2 が返り、何もしない。 */
+        if (diskfs_migrate_to_v5(&dev) == 0) {
+            serial_write_line("[boot] disk: migrated diskfs v4 to v5");
+        }
         /* 回復モードの印を読む。読んだら消す (1 回だけ有効)。 */
         int flag = diskfs_get_recovery_flag(&dev);
         if (flag == 1) {

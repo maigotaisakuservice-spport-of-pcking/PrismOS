@@ -13,7 +13,7 @@
  * plus a message buffer must not live on the kernel stack. */
 static net_tcp_stream mail_stream;
 static char mail_line[512];
-static char mail_msg[PRISM_VFS_MAX_FILE_SIZE];
+static char mail_msg[PRISM_VFS_MAX_APP_FILE_SIZE];
 
 /* ---- transport: plain TCP or implicit TLS ----
  * One connection at a time (the TLS state is a static,
@@ -184,7 +184,7 @@ static void log_received(int fetched) {
  * the VFS under its (sanitised) file name. Returns the
  * number saved. Static scratch: attachments can be up
  * to one full file each. */
-static uint8_t mail_att_data[PRISM_VFS_MAX_FILE_SIZE];
+static uint8_t mail_att_data[PRISM_VFS_MAX_APP_FILE_SIZE];
 
 int mail_save_attachments(const char *msg, size_t len) {
     size_t cursor = 0;
