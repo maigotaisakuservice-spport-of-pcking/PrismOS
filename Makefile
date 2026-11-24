@@ -37,13 +37,17 @@ HOST_CC ?= cc
 
 CFLAGS  := -std=c11 -ffreestanding -fno-stack-protector -fno-pic -fno-pie \
            -MMD -MP \
-           -mno-red-zone -mcmodel=kernel -m64 \
+           -mno-red-zone -mcmodel=kernel -m64 -march=x86-64 \
            -mno-sse -mno-mmx -mno-80387 \
            -Wall -Wextra -O2 -I kernel -I shell
 # -mno-sse/-mno-mmx/-mno-80387 は必須: 起動時の CPU は SSE を
 # 有効化していない (OSFXSR 未設定) ため、コンパイラが構造体
 # コピーなどを SSE 命令に最適化すると #UD で死ぬ (v0.2 フェーズ2
 # で memory_init の構造体コピーが movdqu になり発覚)。
+# -march=x86-64 の明示も必須: 指定しないとコンパイラのデフォルト
+# アーキテクチャに引きずられ、AVX (VEX) や BMI (tzcnt/shlx 等) の
+# 命令が混入しうる。これらは起動直後の CPU では未対応で #UD に
+# なる (CI の新しい gcc で実際に混入し boot-test が落ちた)。
 LDFLAGS := -nostdlib -no-pie -T kernel/linker.ld -z max-page-size=0x1000
 
 # --- Limine (固定バージョン) -------------------------------------------
@@ -604,8 +608,8 @@ test: $(BUILD)/test_shell $(BUILD)/test_memory $(BUILD)/test_desktop $(BUILD)/te
 # カーネルに SSE/MMX/x87 命令が無いことを確認する。起動時の CPU は
 # SSE を有効化していないため、1 つでもあると #UD で死ぬ。
 check-asm: $(KERNEL)
-> @echo "checking kernel for SSE/MMX/x87 instructions..."
-> @objdump -d $(KERNEL) | awk -F'\t' 'NF > 2 {print $$3}' | grep -E "^(movs[sd]|movap[sd]|movup[sd]|movdqu|movdqa|pxor|xorps|padd|psub|pmul|addss|addsd|addps|addpd|subss|subsd|subps|subpd|mulss|mulsd|mulps|mulpd|divss|divsd|divps|divpd|minss|minsd|maxss|maxsd|sqrtss|sqrtsd|cvtss|cvtsd|cvtps|cvtpd|fld|fstp?|fild|fistp?|faddp?|fmulp?|fsubp?|fdivp?|emms|movq %mm)" > $(BUILD)/sse-hits.txt; if [ -s $(BUILD)/sse-hits.txt ]; then echo "FAIL: SSE/MMX/x87 instructions found:"; head -10 $(BUILD)/sse-hits.txt; exit 1; else echo "ok: no SSE/MMX/x87 instructions"; fi
+> @echo "checking kernel for SSE/MMX/x87/AVX/BMI instructions..."
+> @objdump -d $(KERNEL) | awk -F'\t' 'NF > 2 {print $$3}' | grep -E "^(movs[sd]|movap[sd]|movup[sd]|movdqu|movdqa|pxor|xorps|padd|psub|pmul|addss|addsd|addps|addpd|subss|subsd|subps|subpd|mulss|mulsd|mulps|mulpd|divss|divsd|divps|divpd|minss|minsd|maxss|maxsd|sqrtss|sqrtsd|cvtss|cvtsd|cvtps|cvtpd|fld|fstp?|fild|fistp?|faddp?|fmulp?|fsubp?|fdivp?|emms|movq %mm|v[a-z]|tzcnt|lzcnt|shlx|shrx|sarx|xsave|xrstor|ldmxcsr|stmxcsr|popcnt)" > $(BUILD)/sse-hits.txt; if [ -s $(BUILD)/sse-hits.txt ]; then echo "FAIL: SSE/MMX/x87/AVX/BMI instructions found:"; head -10 $(BUILD)/sse-hits.txt; exit 1; else echo "ok: no SSE/MMX/x87/AVX/BMI instructions"; fi
 
 # --- QEMU ----------------------------------------------------------------
 # sh 経由で呼ぶ: GitHub API 経由のプッシュではスクリプトの実行権限が
