@@ -4,7 +4,11 @@
 QEMU の virt 構成に virtio-net-device を付け、ユーザーネット
 ワーキング (slirp) 経由で確認する:
   1. `net` で DHCP により 10.0.2.x が付く ([net] ready)。
-  2. `fetch 10.0.2.2 /` でホスト側 HTTP サーバのページが取れる。
+  2. `fetch 10.0.2.2:8080 /` でホスト側 HTTP サーバのページが取れる。
+
+ホスト側サーバは 8080 番を使う。80 番は特権ポートのため
+CI ランナーのような非 root 環境では bind できない。
+ゲスト側 fetch は host:port 形式に対応している。
 
 外部ネットワークには出ない (ホストの 10.0.2.2 で完結する)。
 
@@ -107,7 +111,7 @@ def main():
     if not os.path.exists(KERNEL):
         print("kernel-arm.bin がありません。make arm-kernel を先に。")
         return 1
-    server = http.server.HTTPServer(("0.0.0.0", 80), Handler)
+    server = http.server.HTTPServer(("0.0.0.0", 8080), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -123,7 +127,7 @@ def main():
         check("net stack ready (DHCP)", ok)
         ok = sess.read_until("net: my ip is 10.0.2.", 20.0)
         check("DHCP address 10.0.2.x", ok)
-        sess.send("fetch 10.0.2.2 /")
+        sess.send("fetch 10.0.2.2:8080 /")
         ok = sess.read_until(MARKER, 60.0)
         check("HTTP fetch returns host page", ok)
         log.write(sess.buf)

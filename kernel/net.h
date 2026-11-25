@@ -228,4 +228,16 @@ size_t net_nd_build_na_body(uint8_t *body, const uint8_t *target,
 size_t net_nd_build_ns_body(uint8_t *body, const uint8_t *target,
                             const uint8_t *mac);
 
+/* Split "host" or "host:port" into a bare host and a port
+ * number. Without ':' the port is 80. A host with two or
+ * more ':' (an IPv6 literal) is passed through with port
+ * 80. Returns 0 on success, -1 on malformed input (empty
+ * host, empty or non-numeric port, port out of range 1..65535,
+ * host too long for out). The split lets fetch reach test
+ * servers on unprivileged ports, which matters where
+ * binding port 80 needs privileges (CI runners run as an
+ * unprivileged user). */
+int net_split_host_port(const char *host, char *out_host, size_t cap,
+                        uint16_t *out_port);
+
 #endif /* PRISM_NET_H */

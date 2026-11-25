@@ -396,6 +396,36 @@ int main(void) {
     CHECK(contains(html, "there"));
     CHECK(!contains(html, "<"));
 
+    /* ---- host:port split (fetch) ---- */
+    char hb[64];
+    uint16_t hp = 0;
+    CHECK(net_split_host_port("example.com", hb, sizeof(hb), &hp) == 0);
+    CHECK(strcmp(hb, "example.com") == 0 && hp == 80);
+    CHECK(net_split_host_port("10.0.2.2:8080", hb, sizeof(hb), &hp) == 0);
+    CHECK(strcmp(hb, "10.0.2.2") == 0 && hp == 8080);
+    CHECK(net_split_host_port("10.0.2.2:1", hb, sizeof(hb), &hp) == 0);
+    CHECK(hp == 1);
+    CHECK(net_split_host_port("10.0.2.2:65535", hb, sizeof(hb), &hp) == 0);
+    CHECK(hp == 65535);
+    CHECK(net_split_host_port("10.0.2.2:0", hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port("10.0.2.2:65536", hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port("10.0.2.2:abc", hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port("10.0.2.2:", hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port(":8080", hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port("", hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port(NULL, hb, sizeof(hb), &hp) != 0);
+    CHECK(net_split_host_port("::1", hb, sizeof(hb), &hp) == 0);
+    CHECK(strcmp(hb, "::1") == 0 && hp == 80);
+    CHECK(net_split_host_port("host:80:90", hb, sizeof(hb), &hp) == 0);
+    CHECK(strcmp(hb, "host:80:90") == 0 && hp == 80);
+    {
+        /* Host longer than the output buffer: rejected. */
+        char long_host[80];
+        memset(long_host, 'a', sizeof(long_host) - 1);
+        long_host[sizeof(long_host) - 1] = '\0';
+        CHECK(net_split_host_port(long_host, hb, sizeof(hb), &hp) != 0);
+    }
+
     if (failures == 0) {
         printf("net tests: %d checks, 0 failures\n", checks);
         printf("PASS\n");

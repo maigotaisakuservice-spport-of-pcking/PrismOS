@@ -163,8 +163,10 @@ int net_tcp_listen(uint16_t port, uint32_t timeout_sec,
 
 /* Fetch http://host/path over plain HTTP. The body is
  * copied into out (at most cap-1 bytes) and NUL terminated.
- * Returns 0 on HTTP 200, else -1. *out_len gets the body
- * length, *status gets the HTTP status code (0 if unknown). */
+ * The host may carry an explicit port ("host:port",
+ * default 80). Returns 0 on HTTP 200, else -1. *out_len
+ * gets the body length, *status gets the HTTP status code
+ * (0 if unknown). */
 int net_fetch_http(const char *host, const char *path, char *out,
                    size_t cap, size_t *out_len, int *status);
 

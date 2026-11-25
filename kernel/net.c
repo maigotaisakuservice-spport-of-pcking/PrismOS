@@ -1152,3 +1152,62 @@ int net_cookie_jar_update(char *jar, size_t cap, const char *host,
     *w = '\0';
     return 0;
 }
+
+int net_split_host_port(const char *host, char *out_host, size_t cap,
+                        uint16_t *out_port) {
+    size_t len = 0;
+    size_t colon = 0;
+    size_t colons = 0;
+    if (host == NULL || out_host == NULL || cap == 0 ||
+        out_port == NULL) {
+        return -1;
+    }
+    while (host[len] != '\0') {
+        if (host[len] == ':') {
+            colon = len;
+            colons++;
+        }
+        len++;
+    }
+    if (len == 0) {
+        return -1;
+    }
+    if (colons != 1) {
+        /* No ':' at all, or an IPv6 literal: pass the host
+         * through unchanged with the default port. */
+        if (len + 1 > cap) {
+            return -1;
+        }
+        for (size_t i = 0; i <= len; i++) {
+            out_host[i] = host[i];
+        }
+        *out_port = 80;
+        return 0;
+    }
+    /* Exactly one ':'. */
+    if (colon == 0 || colon + 1 >= len) {
+        return -1;
+    }
+    uint32_t port = 0;
+    for (size_t i = colon + 1; i < len; i++) {
+        if (host[i] < '0' || host[i] > '9') {
+            return -1;
+        }
+        port = port * 10 + (uint32_t)(host[i] - '0');
+        if (port > 65535) {
+            return -1;
+        }
+    }
+    if (port == 0) {
+        return -1;
+    }
+    if (colon + 1 > cap) {
+        return -1;
+    }
+    for (size_t i = 0; i < colon; i++) {
+        out_host[i] = host[i];
+    }
+    out_host[colon] = '\0';
+    *out_port = (uint16_t)port;
+    return 0;
+}

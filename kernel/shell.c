@@ -4132,7 +4132,7 @@ static void mail_flow(const char *line) {
     serial_write_line("Usage: mail | mail config | mail setup <smtp_host> <smtp_port> <pop3_host> <pop3_port> <user> <pass> <from> | mail send <to> <subject> <body...> | mail recv | mail read <number> | mail del <number>");
 }
 
-/* `fetch <host> [path]`: fetch a plain HTTP page and print
+/* `fetch <host>[:port] [path]`: fetch a plain HTTP page and print
  * its body (at most the output buffer holds). */
 static void fetch_flow(const char *line) {
     const char *p = line + 5; /* skip "fetch" */
@@ -4140,7 +4140,7 @@ static void fetch_flow(const char *line) {
         p++;
     }
     if (*p == '\0') {
-        serial_write_line("Usage: fetch <host> [path]");
+        serial_write_line("Usage: fetch <host>[:port] [path]");
         return;
     }
     char host[64];

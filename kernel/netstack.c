@@ -2819,7 +2819,26 @@ int net_fetch_http_via(const char *proxy_host, uint16_t proxy_port,
 int net_fetch_http_ex(const char *host, const char *path, char *out,
                       size_t cap, size_t *out_len,
                       net_fetch_info *info) {
-    return net_fetch_http_px(host, 80, path, out, cap, out_len,
+    /* A host longer than the scratch buffer keeps the old
+     * behaviour (port 80); every bounded host goes through
+     * the host:port split, defaulting to port 80. */
+    char hostbuf[128];
+    uint16_t port = 80;
+    size_t hlen = 0;
+    if (host == NULL) {
+        return -1;
+    }
+    while (host[hlen] != '\0') {
+        hlen++;
+    }
+    if (hlen >= sizeof(hostbuf)) {
+        return net_fetch_http_px(host, 80, path, out, cap, out_len,
+                                 info);
+    }
+    if (net_split_host_port(host, hostbuf, sizeof(hostbuf), &port) != 0) {
+        return -1;
+    }
+    return net_fetch_http_px(hostbuf, port, path, out, cap, out_len,
                              info);
 }
 
