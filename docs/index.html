@@ -74,6 +74,17 @@
     text-align: center; padding: 24px 16px; font-size: 0.9rem;
   }
   .en { color: var(--text); }
+  .agree {
+    background: #FFF4E5; border: 2px solid #D97706; border-radius: 10px;
+    padding: 14px 16px; margin: 16px 0;
+  }
+  .agree label { font-weight: 700; cursor: pointer; display: block; line-height: 1.6; }
+  .agree input[type="checkbox"] {
+    width: 1.2em; height: 1.2em; vertical-align: -0.2em; margin-right: 8px;
+  }
+  .agree p { margin: 8px 0 0; font-size: 0.92rem; }
+  a.dl-disabled { opacity: 0.4; pointer-events: none; }
+  .terms li { margin-bottom: 8px; line-height: 1.7; }
 </style>
 </head>
 <body>
@@ -169,20 +180,26 @@
       チェックサムを照合してください（一覧ファイル
       <code>SHA256SUMS-27H1.txt</code> も Release に含まれます）。
     </p>
-    <p><a class="btn" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases">GitHub Releases へ</a></p>
+    <div class="agree">
+      <label><input type="checkbox" id="agree-asis"> 本ソフトウェアは現状有姿（AS-IS）・無保証で提供され、使用により生じた損害について開発者は責任を負わないことを理解し、<a href="#terms">利用規約</a>に同意します</label>
+      <p>同意にチェックを入れると、下のダウンロードリンクが有効になります。</p>
+    </div>
+    <p><a class="btn gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases">GitHub Releases へ</a></p>
     <table>
-      <tr><th>種類</th><th>ファイル名</th><th>サイズ</th><th>SHA-256</th></tr>
+      <tr><th>種類</th><th>ファイル名</th><th>サイズ</th><th>SHA-256</th><th>入手</th></tr>
       <tr>
         <td>64-bit 版（標準）</td>
         <td><code>prismos-27h1-64bit.iso</code></td>
         <td>16.1 MiB</td>
         <td class="hash">90261d3f3b662034f546586c0a6b8053d562b4dbf824512939688c58f16fe078</td>
+        <td><a class="gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases/download/27H1/prismos-27h1-64bit.iso">ダウンロード</a></td>
       </tr>
       <tr>
         <td>32-bit 版</td>
         <td><code>prismos-27h1-32bit.iso</code></td>
         <td>4.2 MiB</td>
         <td class="hash">8437f4736ea8f4d4d9dcafc76e13041d87c13b03640de746a07bd49cca0ed9d9</td>
+        <td><a class="gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases/download/27H1/prismos-27h1-32bit.iso">ダウンロード</a></td>
       </tr>
       <tr>
         <td>ARM 版（AArch64）</td>
@@ -191,24 +208,49 @@
         <td>0.5 MiB<br>0.6 MiB</td>
         <td class="hash">df18f49bf4c6fed60c1fb66dd1eccb9b797c31d4ebf126130cca61f331f3cdc7<br>
             403ad07d6a47fb2d077dcaefc9547c19f085bfcecb515d9bc8a2997ee391dad4</td>
+        <td><a class="gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases/download/27H1/prismos-27h1-arm64.bin">bin をダウンロード</a><br>
+            <a class="gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases/download/27H1/prismos-27h1-arm64.elf">elf をダウンロード</a></td>
       </tr>
       <tr>
         <td>Live ブート版（USB）</td>
         <td><code>prismos-27h1-live-usb.img</code></td>
         <td>16.1 MiB</td>
         <td class="hash">90261d3f3b662034f546586c0a6b8053d562b4dbf824512939688c58f16fe078</td>
+        <td><a class="gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases/download/27H1/prismos-27h1-live-usb.img">ダウンロード</a></td>
       </tr>
       <tr>
         <td>仮想環境版（qcow2）</td>
         <td><code>prismos-27h1-vm.qcow2</code></td>
         <td>13.4 MiB</td>
         <td class="hash">3fc67ffb465d1afa43ed2af1fa9d354728dd5022324256981d3d4e947b30a017</td>
+        <td><a class="gated" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases/download/27H1/prismos-27h1-vm.qcow2">ダウンロード</a></td>
       </tr>
     </table>
     <p class="note">
       Live ブート版のイメージは 64-bit 版 ISO と同じ内容の
       ハイブリッドイメージです（SHA-256 が一致します）。
       USB メモリに書き込んで起動できます。
+    </p>
+  </section>
+
+  <section id="terms">
+    <h2>利用規約（無保証・免責）</h2>
+    <p>
+      PrismOS（以下「本ソフトウェア」）は、MIT ライセンスの下で
+      提供されるフリーソフトウェアです。本ソフトウェアを
+      ダウンロードまたは使用した時点で、以下の条件に同意した
+      ものとみなします。
+    </p>
+    <ol class="terms">
+      <li><strong>現状有姿（AS-IS）での提供</strong>：本ソフトウェアは「現状有姿」で提供されます。明示・黙示を問わず、商品性、特定の目的への適合性、権利の非侵害、正確性、完全性、継続的な動作その他一切の保証を行いません。</li>
+      <li><strong>一切の責任を負いません</strong>：本ソフトウェアの使用または使用不能から生じたいかなる損害（データの消失・破損、ハードウェアの故障、業務の中断、逸失利益、その他直接的・間接的・偶発的・派生的な損害を含みます）についても、著作権者および開発者は、損害発生の可能性を事前に知らされていた場合であっても、一切の責任を負いません。</li>
+      <li><strong>自己責任での利用</strong>：インストールと使用は、利用者自身の責任と判断で行ってください。特に実機のディスクへインストールする場合は、重要なデータを事前に必ずバックアップしてください。</li>
+      <li><strong>ライセンス</strong>：著作権表示とライセンス文を保持することを条件に、使用・複製・改変・再配布は自由です。ただし上記の無保証・免責は、再配布先にもそのまま適用されます。全文はリポジトリ内の <code>LICENSE</code>（MIT License）を参照してください。</li>
+      <li><strong>サポート</strong>：サポートは GitHub リポジトリの README（Q&amp;A）のみで、回答や対応を保証するものではありません。</li>
+    </ol>
+    <p class="note">
+      要するに：自由に使ってよいものですが、壊れても、データが消えても、
+      責任は負いません。大事な環境では使わず、まず仮想環境で試してください。
     </p>
   </section>
 
@@ -320,12 +362,37 @@
       real-hardware boot is not yet
       verified. See the release notes for the full known-issues
       list. Support is via the GitHub README Q&amp;A only.
+      The software is provided "AS IS" under the MIT License,
+      without warranty of any kind and without any liability
+      for damages arising from its use — see the terms
+      section above.
     </p>
   </section>
 
 </main>
 <footer>
-  PrismOS 27H1 — 公式ページ（docs/index.html）。サポートは GitHub README の Q&amp;A のみです。
+  PrismOS 27H1 — 公式ページ（docs/index.html）。サポートは GitHub README の Q&amp;A のみです。<br>
+  本ソフトウェアは現状有姿（AS-IS）・無保証で提供され、開発者は使用により生じた損害について責任を負いません（<a href="#terms">利用規約</a>）。
 </footer>
+<script>
+(function () {
+  var box = document.getElementById('agree-asis');
+  var links = document.querySelectorAll('a.gated');
+  function apply() {
+    links.forEach(function (a) {
+      if (box.checked) {
+        a.classList.remove('dl-disabled');
+        if (a.dataset.href) a.href = a.dataset.href;
+      } else {
+        a.classList.add('dl-disabled');
+        if (!a.dataset.href) a.dataset.href = a.href;
+        a.href = '#download';
+      }
+    });
+  }
+  box.addEventListener('change', apply);
+  apply();
+})();
+</script>
 </body>
 </html>
