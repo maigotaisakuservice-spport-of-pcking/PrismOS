@@ -16,6 +16,10 @@ void serial_write(const char *s);
 void serial_write_line(const char *s);
 /* 1文字読めるまでポーリングして返す。 */
 char serial_read_char(void);
+/* 受信データがあるかどうか (ブロックしない)。 */
+int serial_has_data(void);
+/* 受信データがあれば 1 文字返し、無ければ -1 を返す。 */
+int serial_try_read_char(void);
 /* 1行読む。'\r' / '\n' で確定し、入力はエコーする。
  * 戻り値は読み込んだ文字数。バッファは NUL 終端される。 */
 size_t serial_read_line(char *buf, size_t cap);

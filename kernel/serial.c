@@ -54,6 +54,17 @@ char serial_read_char(void) {
     return (char)prism_inb(COM1);
 }
 
+int serial_has_data(void) {
+    return serial_received();
+}
+
+int serial_try_read_char(void) {
+    if (!serial_received()) {
+        return -1;
+    }
+    return prism_inb(COM1);
+}
+
 size_t serial_read_line(char *buf, size_t cap) {
     size_t len = 0;
     for (;;) {

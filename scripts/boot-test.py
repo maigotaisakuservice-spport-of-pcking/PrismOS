@@ -21,8 +21,16 @@
   * 全チェックが通るまで標準入力を開けたままにし、最後に QEMU を
     きれいに終了させる。
 
-使い方: python3 scripts/boot-test.py [--log PATH]   (終了コード 0 = 合格)
+使い方: python3 scripts/boot-test.py [--log PATH] [--keyboard]
+  (終了コード 0 = 合格)
 標準ライブラリのみを使う。
+
+--keyboard を付けると、QEMU モニタ (unix ソケット) 経由で sendkey を
+送り、PS/2 キーボード入力も確認する。表示は無い (-display none)
+ため、キーボードで打った文字はシリアルにエコーされる。
+  * "vex" + Backspace + "r" + Enter をキーボードで打ち、
+    "PrismOS version 27H1" が出ることを確認する
+    (Backspace が効くことも同時に確認する)。
 
 --log を指定すると、そのパスにブートログを書く。並行して走る
 テストと build/boot.log を共有すると、片方がファイルを切り詰めて
@@ -35,6 +43,7 @@ import os
 import pty
 import select
 import signal
+import socket
 import subprocess
 import sys
 import termios
@@ -46,6 +55,7 @@ ISO = os.path.join(ROOT, "build", "prismos.iso")
 DEFAULT_LOG = os.path.join(ROOT, "build", "boot.log")
 DEFAULT_STDERR_LOG = os.path.join(ROOT, "build", "qemu-stderr.log")
 DEFAULT_DEBUG_LOG = os.path.join(ROOT, "build", "qemu-debug.log")
+DEFAULT_MONITOR_SOCK = os.path.join(ROOT, "build", "qemu-monitor.sock")
 
 QEMU = "qemu-system-x86_64"
 QEMU_ARGS = [
@@ -66,15 +76,31 @@ QEMU_ARGS = [
 ]
 
 # (送るコマンド, その応答に含まれるはずの文字列, ラベル)
+# v0.2 フェーズ2: VFS (echo > / cat / ls / rm) と mem コマンドも確認する。
 CHECKS = [
     ("help", "PrismOS shell", "help output"),
-    ("ver", "PrismOS version 0.1.0", "ver output"),
+    ("ver", "PrismOS version 27H1", "ver output"),
     ("ls", "README.txt", "ls output"),
     ("about", "A customizable OS", "about output"),
+    ("echo hello prism > note.txt", "wrote 12 bytes to note.txt",
+     "echo redirect write"),
+    ("cat note.txt", "hello prism", "cat created file"),
+    ("ls", "note.txt", "ls shows created file"),
+    ("mem", "memory:", "mem command"),
+    ("rm note.txt", "removed note.txt", "rm file"),
+    ("cat note.txt", "No such file", "cat removed file"),
 ]
 
 PROMPT = "prismos> "
-BANNER = "PrismOS 0.1.0"
+BANNER = "PrismOS 27H1"
+KEYBOARD_READY = "keyboard: PS/2 ready"
+
+# キーボードテストで送るキー (HMP sendkey のキー名) と間隔 (秒)。
+# "vex" と打って Backspace で "x" を消し、"r" を打って "ver" にする。
+KEYBOARD_KEYS = [
+    ("v", 0.15), ("e", 0.15), ("x", 0.15),
+    ("backspace", 0.2), ("r", 0.15), ("ret", 0.3),
+]
 
 PROMPT_TIMEOUT = 30.0   # プロンプト待ちの制限 (秒)
 CMD_TIMEOUT = 20.0      # 1 コマンドの応答待ちの制限 (秒)
@@ -91,9 +117,22 @@ def main() -> int:
                         help="ブートログの出力先 (既定: build/boot.log)")
     parser.add_argument("--stderr-log", default=DEFAULT_STDERR_LOG,
                         help="QEMU の stderr の出力先")
+    parser.add_argument("--keyboard", action="store_true",
+                        help="QEMU モニタ経由の sendkey で PS/2 キーボード入力も確認する")
     args = parser.parse_args()
     LOG = args.log
     STDERR_LOG = args.stderr_log
+    MONITOR_SOCK = DEFAULT_MONITOR_SOCK
+
+    qemu_args = list(QEMU_ARGS)
+    if args.keyboard:
+        # 古いソケットが残っていると QEMU が起動しないので消す。
+        try:
+            os.unlink(MONITOR_SOCK)
+        except OSError:
+            pass
+        qemu_args += ["-monitor",
+                      "unix:%s,server,nowait" % MONITOR_SOCK]
 
     if not os.path.exists(ISO):
         print("MISSING: ISO がありません: %s (先に make してください)" % ISO)
@@ -114,7 +153,7 @@ def main() -> int:
     termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
     proc = subprocess.Popen(
-        QEMU_ARGS,
+        qemu_args,
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=stderr_file,
@@ -187,10 +226,13 @@ def main() -> int:
         # \r で行を確定する (カーネルは \r / \n で行末とみなす)。
         os.write(master_fd, (cmd + "\r").encode("ascii"))
 
+    monitor_sock = None
     try:
         # 1. バナーと最初のプロンプトを待つ。
         wait_for(BANNER, PROMPT_TIMEOUT, "boot banner")
         print("ok: boot banner")
+        wait_for(KEYBOARD_READY, PROMPT_TIMEOUT, "keyboard ready")
+        print("ok: keyboard ready")
         wait_for(PROMPT, PROMPT_TIMEOUT, "shell prompt")
         print("ok: shell prompt")
 
@@ -202,6 +244,34 @@ def main() -> int:
             # 次のプロンプトが出るまで待ってから次のコマンドを送る。
             # (シェルが次の行を読み始めた証拠になる)
             wait_for(PROMPT, CMD_TIMEOUT, "shell prompt after %s" % cmd)
+
+        # 3. --keyboard のときだけ: モニタ経由でキーを送って
+        #    PS/2 キーボード入力を確認する。
+        if args.keyboard:
+            monitor_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            monitor_sock.settimeout(5)
+            monitor_sock.connect(MONITOR_SOCK)
+
+            def hmp(cmd):
+                """HMP コマンドを送り、(qemu) プロンプトまで読む。"""
+                monitor_sock.sendall((cmd + "\n").encode("ascii"))
+                data = b""
+                while b"(qemu)" not in data:
+                    chunk = monitor_sock.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                return data
+
+            hmp("")  # 接続時の挨拶を読み捨てる
+            for key, delay in KEYBOARD_KEYS:
+                hmp("sendkey %s" % key)
+                time.sleep(delay)
+            wait_for("PrismOS version 27H1", CMD_TIMEOUT,
+                     "keyboard ver output")
+            print("ok: keyboard ver output (with Backspace)")
+            wait_for(PROMPT, CMD_TIMEOUT, "shell prompt after keyboard")
+            print("ok: keyboard input")
 
         if time.monotonic() - start > OVERALL_TIMEOUT:
             raise BootTestFailure(
@@ -217,6 +287,15 @@ def main() -> int:
         print("MISSING: QEMU との通信でエラー: %s" % e)
         failures.append(str(e))
     finally:
+        if monitor_sock is not None:
+            try:
+                monitor_sock.close()
+            except OSError:
+                pass
+            try:
+                os.unlink(MONITOR_SOCK)
+            except OSError:
+                pass
         # QEMU をきれいに止める。まず SIGTERM、ダメなら SIGKILL。
         if proc.poll() is None:
             proc.send_signal(signal.SIGTERM)
