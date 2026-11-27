@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrismOS 27H1 — 公式ページ</title>
+<meta name="description" content="PrismOS 27H1（製品版）の公式ページ。ダウンロード、インストール手順、最初の一歩、既知の問題。">
+<style>
+  :root {
+    --bg: #FFFFFF;
+    --panel: #F2F4F8;
+    --accent: #4CC2FF;
+    --accent-dark: #1B9BDC;
+    --text: #0B1026;
+    --muted: #4A5468;
+    --line: #D8DEE9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans",
+      "Noto Sans JP", "Yu Gothic UI", sans-serif;
+    line-height: 1.7;
+  }
+  header {
+    text-align: center; padding: 48px 16px 8px;
+  }
+  header img.logo { max-width: 520px; width: 90%; height: auto; }
+  header h1 { font-size: 2rem; margin: 8px 0 4px; }
+  header p.tagline { color: var(--muted); margin: 0 0 8px; font-size: 1.05rem; }
+  main { max-width: 960px; margin: 0 auto; padding: 0 16px 64px; }
+  section { margin-top: 44px; }
+  h2 {
+    font-size: 1.4rem; border-left: 6px solid var(--accent);
+    padding-left: 10px; margin-bottom: 14px;
+  }
+  h3 { font-size: 1.1rem; margin: 22px 0 6px; }
+  .hero img, figure img {
+    width: 100%; height: auto; border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  figure { margin: 18px 0; }
+  figcaption { color: var(--muted); font-size: 0.9rem; text-align: center; margin-top: 6px; }
+  .grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border-radius: 10px; padding: 16px 18px;
+  }
+  .card h3 { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td {
+    border: 1px solid var(--line); padding: 8px 10px;
+    text-align: left; vertical-align: top;
+  }
+  th { background: var(--panel); }
+  code, .hash {
+    font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
+    font-size: 0.82rem; word-break: break-all;
+  }
+  a { color: var(--accent-dark); }
+  .btn {
+    display: inline-block; background: var(--accent); color: #06283D;
+    font-weight: 700; text-decoration: none; padding: 6px 14px;
+    border-radius: 6px; white-space: nowrap;
+  }
+  .note {
+    background: var(--panel); border-left: 6px solid var(--accent);
+    padding: 10px 14px; border-radius: 0 8px 8px 0;
+  }
+  footer {
+    border-top: 1px solid var(--line); color: var(--muted);
+    text-align: center; padding: 24px 16px; font-size: 0.9rem;
+  }
+  .en { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <img class="logo" src="images/logo-light.png" alt="PrismOS ロゴ">
+  <h1>PrismOS 27H1</h1>
+  <p class="tagline">どこでもカスタムできる OS — 製品版 27H1 公式ページ</p>
+</header>
+<main>
+
+  <figure class="hero">
+    <img src="images/shot-boot.png" alt="PrismOS の起動アニメーション">
+    <figcaption>起動アニメーション（現行ビルドで実際に撮影）</figcaption>
+  </figure>
+
+  <section id="about">
+    <h2>PrismOS とは</h2>
+    <p>
+      PrismOS は、見た目も動きも自分好みに変えられることを目指した
+      デスクトップ OS です。中央寄せのモダンな UI、Dock と横断検索、
+      2 つの体系のコマンドが使えるシェルを持ち、テーマ・壁紙・
+      タスクバーの位置から細部までカスタマイズできます。
+      使いやすさは「かんたんモード」のような割り切りではなく、
+      良い初期設定と 1 つの統一された画面で実現します。
+    </p>
+    <div class="grid">
+      <div class="card">
+        <h3>カスタマイズ</h3>
+        <p>アクセントカラー、壁紙（自分の画像も可）、タスクバーと Dock の
+        位置・サイズ、ショートカット、文字サイズなどを設定アプリから
+        変更できます。設定は自動保存されます。</p>
+      </div>
+      <div class="card">
+        <h3>標準アプリ</h3>
+        <p>ブラウザ（Prism Browser）、オフィス（Prism Office：文書・
+        表計算・スライド）、メール、カレンダー、連絡先、メモ、時計、
+        カメラ、ボイスレコーダー、写真・動画・音楽プレイヤー、
+        3D シューティングゲームとトランプ一式、アプリストア
+        （Prism Store）など全 24 本が入っています。</p>
+      </div>
+      <div class="card">
+        <h3>セキュリティ</h3>
+        <p>市役所レベルの Enterprise 標準を最初から適用。ディスク全体の
+        暗号化、複数ユーザー＋ゲスト、PIN ポリシーとロックアウト、
+        TOTP 2 要素認証、アプリ許可リスト、改ざん検知つき監査ログ、
+        署名（ML-DSA）のない更新・ドライバの拒否まで備えます。
+        アカウントはローカルのみで、テレメトリはありません。</p>
+      </div>
+      <div class="card">
+        <h3>互換レイヤー（正直な範囲）</h3>
+        <p>他の OS 向けプログラムを動かすための自作の互換レイヤーが
+        あります。動くのは PrismOS の呼び出し規約に合わせた
+        ELF ゲストプログラム（動的リンク対応、サンドボックス内で
+        実行）までで、世の中の既存アプリがそのまま全部動くわけでは
+        ありません。Win32 互換の本格化は次期大型アップデート
+        27H2 の目玉です。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="screenshots">
+    <h2>スクリーンショット</h2>
+    <p>すべて 27H1 の現行ビルドを QEMU で起動して撮影した実画面です。</p>
+    <figure>
+      <img src="images/shot-desktop.png" alt="デスクトップ">
+      <figcaption>デスクトップ（壁紙、中央寄せタスクバー、日付つき時計。Dock は初期状態では非表示で、設定で表示できます）</figcaption>
+    </figure>
+    <div class="grid">
+      <figure>
+        <img src="images/shot-settings.png" alt="設定アプリ">
+        <figcaption>設定アプリ（見た目のページ）</figcaption>
+      </figure>
+      <figure>
+        <img src="images/shot-files.png" alt="Files アプリ">
+        <figcaption>Files（ファイル一覧、日付・サイズ表示）</figcaption>
+      </figure>
+    </div>
+      <figure>
+        <img src="images/shot-terminal.png" alt="ターミナル">
+        <figcaption>ターミナル（<code>help</code> でコマンド一覧を表示）</figcaption>
+      </figure>
+      <figure>
+        <img src="images/shot-wifi.png" alt="Wi-Fi クイックパネル">
+        <figcaption>タスクバーのクイックパネル（Wi-Fi のオン/オフと接続はここから。対応ハードウェアが無い環境では正直にその旨を表示します）</figcaption>
+      </figure>
+  </section>
+
+  <section id="download">
+    <h2>ダウンロード（5 種類）</h2>
+    <p>
+      配布は GitHub Releases からのみ行います。下表のファイル名が
+      Release のアセット名です。ダウンロード後は SHA-256 で
+      チェックサムを照合してください（一覧ファイル
+      <code>SHA256SUMS-27H1.txt</code> も Release に含まれます）。
+    </p>
+    <p><a class="btn" href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/releases">GitHub Releases へ</a></p>
+    <table>
+      <tr><th>種類</th><th>ファイル名</th><th>サイズ</th><th>SHA-256</th></tr>
+      <tr>
+        <td>64-bit 版（標準）</td>
+        <td><code>prismos-27h1-64bit.iso</code></td>
+        <td>16.1 MiB</td>
+        <td class="hash">90261d3f3b662034f546586c0a6b8053d562b4dbf824512939688c58f16fe078</td>
+      </tr>
+      <tr>
+        <td>32-bit 版</td>
+        <td><code>prismos-27h1-32bit.iso</code></td>
+        <td>4.2 MiB</td>
+        <td class="hash">8437f4736ea8f4d4d9dcafc76e13041d87c13b03640de746a07bd49cca0ed9d9</td>
+      </tr>
+      <tr>
+        <td>ARM 版（AArch64）</td>
+        <td><code>prismos-27h1-arm64.bin</code>（起動用）<br>
+            <code>prismos-27h1-arm64.elf</code>（デバッグ用）</td>
+        <td>0.5 MiB<br>0.6 MiB</td>
+        <td class="hash">df18f49bf4c6fed60c1fb66dd1eccb9b797c31d4ebf126130cca61f331f3cdc7<br>
+            403ad07d6a47fb2d077dcaefc9547c19f085bfcecb515d9bc8a2997ee391dad4</td>
+      </tr>
+      <tr>
+        <td>Live ブート版（USB）</td>
+        <td><code>prismos-27h1-live-usb.img</code></td>
+        <td>16.1 MiB</td>
+        <td class="hash">90261d3f3b662034f546586c0a6b8053d562b4dbf824512939688c58f16fe078</td>
+      </tr>
+      <tr>
+        <td>仮想環境版（qcow2）</td>
+        <td><code>prismos-27h1-vm.qcow2</code></td>
+        <td>13.4 MiB</td>
+        <td class="hash">3fc67ffb465d1afa43ed2af1fa9d354728dd5022324256981d3d4e947b30a017</td>
+      </tr>
+    </table>
+    <p class="note">
+      Live ブート版のイメージは 64-bit 版 ISO と同じ内容の
+      ハイブリッドイメージです（SHA-256 が一致します）。
+      USB メモリに書き込んで起動できます。
+    </p>
+  </section>
+
+  <section id="install">
+    <h2>インストール手順</h2>
+
+    <h3>64-bit 版（標準）</h3>
+    <ol>
+      <li><code>prismos-27h1-64bit.iso</code> をダウンロードし、チェックサムを照合します。</li>
+      <li>仮想環境なら ISO を光学ドライブに接続し、実機なら USB メモリ等に書き込んで起動します。</li>
+      <li>起動したらデスクトップが開きます。ディスクにインストールするには「Install」アプリ（またはシェルの <code>install yes</code>）を使い、画面の案内に従います。インストール時に言語（日本語／英語）を選べます。</li>
+    </ol>
+
+    <h3>32-bit 版</h3>
+    <ol>
+      <li><code>prismos-27h1-32bit.iso</code> を 64-bit 版と同じ手順で起動します。</li>
+      <li>起動すると GUI デスクトップが開きます（ネットワーク〈e1000〉にも対応）。64-bit 版と比べると一部機能に制限があります。</li>
+    </ol>
+
+    <h3>ARM 版（AArch64）</h3>
+    <ol>
+      <li><code>prismos-27h1-arm64.bin</code> を用意します。</li>
+      <li>QEMU の virt マシンで <code>-kernel prismos-27h1-arm64.bin</code> を指定して起動します（シリアルコンソールと画面の両方に対応）。実機での起動は未検証です。</li>
+    </ol>
+
+    <h3>Live ブート版（USB）</h3>
+    <ol>
+      <li><code>prismos-27h1-live-usb.img</code> を USB メモリにそのまま書き込みます（イメージファイル全体のコピーです）。</li>
+      <li>USB から起動すると、インストールしなくてもデスクトップが使えます。気に入ったら「Install」からディスクへインストールできます。</li>
+    </ol>
+
+    <h3>仮想環境版（qcow2）</h3>
+    <ol>
+      <li><code>prismos-27h1-vm.qcow2</code> を仮想マシンのディスクとして接続し、ディスクから起動します。</li>
+      <li>インストール済みの状態で起動するので、そのまま使い始められます。最初に管理者 PIN の設定を行ってください。</li>
+    </ol>
+  </section>
+
+  <section id="firststeps">
+    <h2>最初の一歩</h2>
+    <ol>
+      <li><strong>言語</strong>：インストール時に日本語／英語を選べます。後から設定アプリでも切り替えられます。</li>
+      <li><strong>アカウント</strong>：追加のユーザーは「設定」アプリの「アカウント」ページから作れます（管理者の PIN 確認が必要です）。自分の PIN の変更や TOTP 2 要素認証の設定も同じページです。</li>
+      <li><strong>壁紙と見た目</strong>：Photos で画像を開いて「壁紙に設定する」を選ぶか、設定アプリの「見た目」から変更できます。</li>
+      <li><strong>更新</strong>：設定アプリの「更新」ページで新しい版を確認できます。セキュリティ更新は自動、機能更新は手動で適用します。失敗した場合は自動で前の状態に戻ります。</li>
+      <li><strong>困ったら</strong>：回復モード（起動時に R キー）で、データを残した修復・復元ポイントへの巻き戻し・初期化・前の版からの修復が選べます。</li>
+    </ol>
+  </section>
+
+  <section id="known-issues">
+    <h2>既知の問題</h2>
+    <p>
+      できていないこと・まだ検証できていないことは、隠さず
+      リリースノートにまとめています。代表例：実機での起動
+      確認は未実施、Wi-Fi は接続する画面と流れ（設定・
+      クイックパネル・パスワード入力・保存済み
+      ネットワーク）を実装しテスト済みですが、無線
+      ドライバ自体は実機検証待ち（対応機器が無い環境では
+      「ハードウェアが見つかりません」と表示されます）、
+      Bluetooth は未実装、カメラはアプリと UVC ドライバを実装
+      しましたが実デバイスからの転送は未検証、内蔵アプリの
+      完全なプロセス隔離は未実装（障害の封じ込めまで）、
+      複数モニタは未検証、録音の採取完了は現環境で観測
+      できていません。文字サイズ「特大」では一部の固定
+      レイアウト画面がウィンドウからはみ出します。
+      また、天気・ニュースウィジェットの配信の取得・表示は
+      ローカルのテストサーバーで確認済み。実際の外部
+      サービスの配信での動作は未検証です。
+      全文は
+      <a href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS/blob/main/docs/RELEASE_NOTES_27H1.md">リリースノート（docs/RELEASE_NOTES_27H1.md）</a>
+      を見てください。
+    </p>
+  </section>
+
+  <section id="support">
+    <h2>サポート</h2>
+    <p>
+      サポート窓口は GitHub リポジトリの README（Q&amp;A）のみです。
+      <a href="https://github.com/maigotaisakuservice-spport-of-pcking/PrismOS">GitHub の PrismOS リポジトリ</a>
+      を見てください。
+    </p>
+  </section>
+
+  <section id="english" class="en">
+    <h2>English summary</h2>
+    <p>
+      PrismOS 27H1 is a customizable desktop OS: a modern centered UI
+      with a Dock and global search, a shell with two command styles,
+      a full set of built-in apps (Prism Browser, Prism Office, mail,
+      photos, music, games, Prism Store), enterprise-grade security
+      (full-disk encryption, multi-user accounts with TOTP, signed
+      updates verified with ML-DSA) and five build variants
+      (64-bit, 32-bit, ARM64, Live USB, VM qcow2) — see the download
+      table above for file names and SHA-256 checksums.
+    </p>
+    <p>
+      Honest scope: the compatibility layer runs ELF guest programs
+      built for PrismOS's own interface inside a sandbox; it does not
+      run arbitrary existing applications. Full Win32 compatibility
+      is the headline of the next major update, 27H2. A camera app
+      and UVC driver are implemented, but capture from a real device
+      is unverified (no UVC emulation in QEMU); the Wi-Fi
+      connection experience (settings page, quick panel,
+      password dialog, saved networks) is implemented and
+      tested, but the radio driver itself awaits
+      real-hardware verification (environments without
+      supported hardware honestly report that no Wi-Fi
+      hardware was found); Bluetooth is not implemented;
+      real-hardware boot is not yet
+      verified. See the release notes for the full known-issues
+      list. Support is via the GitHub README Q&amp;A only.
+    </p>
+  </section>
+
+</main>
+<footer>
+  PrismOS 27H1 — 公式ページ（docs/index.html）。サポートは GitHub README の Q&amp;A のみです。
+</footer>
+</body>
+</html>
