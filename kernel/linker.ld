@@ -19,16 +19,19 @@ SECTIONS {
         *(.data.*)
     }
 
+    /* Limine リクエストは limine.h のマクロが
+     * .limine_requests セクションに置く。.bss の前へ置く
+     * こと。後ろに置くと、NOBITS の .bss の分までファイルに
+     * 0 埋めが入り、kernel.elf が 30MB 級に膨らんでブート
+     * パーティション (32MB) に新旧 2 個が入らなくなる。 */
+    .limine_requests : {
+        *(.limine_requests)
+        *(.limine_requests.*)
+    }
+
     .bss : {
         *(.bss)
         *(.bss.*)
         *(COMMON)
-    }
-
-    /* Limine リクエストは limine.h のマクロが
-     * .limine_requests セクションに置く。 */
-    .limine_requests : {
-        *(.limine_requests)
-        *(.limine_requests.*)
     }
 }
