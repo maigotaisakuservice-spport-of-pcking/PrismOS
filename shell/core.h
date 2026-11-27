@@ -5,7 +5,7 @@
  * そのためカーネル (-nostdlib) でも、ホストのユニットテスト
  * (tests/test_shell.c) でも同じソースをコンパイルできる。
  *
- * Linux / Windows 両対応: 各コマンドは正規名を持ち、別名でも
+ * 2つのコマンド体系に対応: 各コマンドは正規名を持ち、別名でも
  * 動く。ls=dir、cat=type、clear=cls、ver=version、など。
  */
 #ifndef PRISM_SHELL_CORE_H
@@ -15,12 +15,13 @@
 #include <stdint.h>
 
 #define PRISM_SHELL_MAX_ARGS 16
-#define PRISM_SHELL_LINE_CAP 256
+#define PRISM_SHELL_LINE_CAP 512
 
 typedef struct {
     char cwd[64];
     int should_reboot; /* reboot コマンドが実行された */
     int should_clear;  /* clear / cls が実行された */
+    int language;      /* 0 = 英語、1 = 日本語 (help の言語) */
 } prism_shell_state;
 
 void prism_shell_init(prism_shell_state *state);
