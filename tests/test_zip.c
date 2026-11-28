@@ -132,6 +132,38 @@ int main(void) {
               "wrapping cd_offset+cd_size rejected");
     }
 
+    /* 格納 (stored) 項目の comp/uncomp サイズ不一致を拒否する
+     * (ペンテスト F1 の回帰テスト)。uncomp だけを小さく細工した
+     * 項目が、cap を超えて出力先へ書き込んではならない。 */
+    {
+        int n3 = zip_read_entries(out, (size_t)total, entries,
+                                  ZIP_MAX_ENTRIES);
+        check(n3 == 3, "stored-mismatch zip parses");
+        const zip_entry *be = zip_find_entry(entries, n3, "big.bin");
+        check(be != NULL && be->method == 0 && be->comp_size == 1000 &&
+                  be->uncomp_size == 1000,
+              "stored-mismatch entry found");
+        if (be != NULL) {
+            zip_entry evil = *be;
+            evil.uncomp_size = 1; /* comp_size=1000 のまま */
+            check(zip_read_entry(out, (size_t)total, &evil, back,
+                                 512) == -1,
+                  "stored comp>uncomp rejected");
+            evil.uncomp_size = 2000; /* comp_size=1000 のまま */
+            check(zip_read_entry(out, (size_t)total, &evil, back,
+                                 sizeof(back)) == -1,
+                  "stored comp<uncomp rejected");
+            /* 一致していても cap を超えれば拒否する。 */
+            check(zip_read_entry(out, (size_t)total, be, back, 512) ==
+                      -1,
+                  "stored over cap rejected");
+            /* 正規の格納項目は引き続き読める。 */
+            check(zip_read_entry(out, (size_t)total, be, back,
+                                 sizeof(back)) == 1000,
+                  "stored legit read still ok");
+        }
+    }
+
     /* 実物の DEFLATE 項目 (Python の zipfile が圧縮したもの)
      * を読む。 */
     {

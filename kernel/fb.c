@@ -812,8 +812,12 @@ void fb_draw_image_rgb24_rect(uint64_t x, uint64_t y, uint64_t w,
                               int src_w, int src_h, int src_stride,
                               int top_down, int rx, int ry, int rw,
                               int rh) {
+    /* src_w * 3 は 64 ビットで計算する。int のままだと巨大な幅で
+     * 巻き戻り、短すぎる stride が検査を通ってしまう
+     * (ペンテスト F3)。 */
     if (!fb_ok || src == NULL || src_w <= 0 || src_h <= 0 ||
-        src_stride < src_w * 3 || rw <= 0 || rh <= 0) {
+        (int64_t)src_stride < (int64_t)src_w * 3 || rw <= 0 ||
+        rh <= 0) {
         return;
     }
     if (x >= fb_w || y >= fb_h) {
@@ -869,7 +873,7 @@ void fb_draw_image_rgb24_fade(uint64_t x, uint64_t y, uint64_t w,
                               int src_w, int src_h, int src_stride,
                               int top_down, int fade) {
     if (!fb_ok || src == NULL || src_w <= 0 || src_h <= 0 ||
-        src_stride < src_w * 3) {
+        (int64_t)src_stride < (int64_t)src_w * 3) {
         return;
     }
     if (x >= fb_w || y >= fb_h) {

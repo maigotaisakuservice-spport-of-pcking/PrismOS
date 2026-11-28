@@ -105,7 +105,8 @@ int pe_parse(const uint8_t *data, size_t len, pe_info *out) {
         return -1;
     }
     uint32_t nt_off;
-    if (rd32(data, len, 0x3C, &nt_off) != 0 || nt_off + 24 > len) {
+    if (rd32(data, len, 0x3C, &nt_off) != 0 ||
+        (uint64_t)nt_off + 24 > (uint64_t)len) {
         return -3;
     }
     uint32_t sig;
@@ -124,8 +125,8 @@ int pe_parse(const uint8_t *data, size_t len, pe_info *out) {
     if (nsec > PE_MAX_SECTIONS) {
         return -4;
     }
-    size_t opt = nt_off + 24;
-    if (opt + opt_size > len || opt_size < 112) {
+    size_t opt = (size_t)nt_off + 24;
+    if ((uint64_t)opt + opt_size > (uint64_t)len || opt_size < 112) {
         return -3;
     }
     uint16_t magic;
@@ -155,6 +156,12 @@ int pe_parse(const uint8_t *data, size_t len, pe_info *out) {
         entry >= size_image) {
         return -5;
     }
+    /* SizeOfHeaders がファイル長を超える細工 PE を拒否する
+     * (ペンテスト F2)。run_pe はこの長さだけヘッダ領域を写す
+     * ため、受理するとファイルバッファの外を読む。 */
+    if ((uint64_t)out->size_of_headers > (uint64_t)len) {
+        return -3;
+    }
     out->image_base = image_base;
     out->entry_rva = entry;
     out->size_of_image = size_image;
@@ -175,7 +182,12 @@ int pe_parse(const uint8_t *data, size_t len, pe_info *out) {
         rd32(data, len, so + 16, &s->raw_size);
         rd32(data, len, so + 20, &s->raw_ptr);
         rd32(data, len, so + 36, &s->chars);
-        if (s->raw_ptr + s->raw_size > len && s->raw_size > 0) {
+        /* raw_ptr + raw_size は 64 ビットで計算する。32 ビットの
+         * ままだと合計が巻き戻り (例: 0xFFFFFFF0 + 0x20 → 0x10)、
+         * 範囲外セクションが検査を通ってしまう (ペンテスト F2)。 */
+        if (s->raw_size > 0 &&
+            (uint64_t)s->raw_ptr + (uint64_t)s->raw_size >
+                (uint64_t)len) {
             return -3;
         }
     }
@@ -206,6 +218,11 @@ int pe_parse(const uint8_t *data, size_t len, pe_info *out) {
             uint32_t thunk_rva = (oft != 0) ? oft : ft;
             for (int t = 0; t < 256; t++) {
                 uint32_t t_off;
+                /* thunk_rva + t*8 の 32 ビット巻き戻しを防ぐ。 */
+                if ((uint64_t)thunk_rva + (uint64_t)t * 8 >
+                    0xFFFFFFFFu) {
+                    return -5;
+                }
                 if (pe_rva_to_offset(out, data, len,
                                      thunk_rva + (uint32_t)t * 8,
                                      &t_off) != 0) {

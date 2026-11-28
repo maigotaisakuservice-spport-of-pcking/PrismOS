@@ -39,19 +39,31 @@ int wallpaper_parse(const uint8_t *data, size_t len, wallpaper_img *out) {
         return -1;
     }
     int top_down = 0;
+    int64_t hgt = height;
     if (height < 0) {
         top_down = 1;
-        height = -height;
+        hgt = -(int64_t)height; /* INT32_MIN でも溢れない */
     }
-    int stride = (width * 3 + 3) & ~3;
-    if (offset > len ||
-        (uint64_t)offset + (uint64_t)stride * (uint64_t)height > len) {
+    /* 寸法の上限: 壁紙・ロゴ・写真表示という用途では 8192 px を
+     * 超える BMP は扱わない (埋め込み壁紙は 1280x800)。stride を
+     * int に収めるための前提でもある。 */
+    if (width > 8192 || hgt > 8192) {
+        return -1;
+    }
+    /* stride と必要長は 64 ビットで計算する。int のままだと巨大な
+     * 幅で stride が巻き戻り (幅 0x55555556 → stride 4)、短い
+     * ファイルを「収まる」と誤判定して受理してしまう
+     * (ペンテスト F3)。 */
+    uint64_t stride = ((uint64_t)(uint32_t)width * 3u + 3u) &
+                      ~(uint64_t)3u;
+    if ((uint64_t)offset > (uint64_t)len ||
+        (uint64_t)offset + stride * (uint64_t)hgt > (uint64_t)len) {
         return -1;
     }
     out->pixels = data + offset;
     out->width = width;
-    out->height = height;
-    out->stride = stride;
+    out->height = (int)hgt;
+    out->stride = (int)stride;
     out->top_down = top_down;
     return 0;
 }

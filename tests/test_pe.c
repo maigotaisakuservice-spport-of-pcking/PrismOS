@@ -214,6 +214,32 @@ int main(void) {
     pe[0] = 'M';
     check(pe_parse(pe, 100, &info) == -3, "truncated PE rejected");
 
+    /* ペンテスト F2 の回帰テスト: ファイル長を超える
+     * SizeOfHeaders と、合計が 32 ビットで巻き戻るセクション
+     * 範囲を拒否する。 */
+    {
+        static uint8_t evil[2048];
+        size_t elen = build_pe(evil, 0);
+        size_t eopt = 0x80 + 24;
+        put32(evil, eopt + 60, 0x3000); /* SizeOfHeaders > len */
+        check(pe_parse(evil, elen, &info) == -3,
+              "oversized SizeOfHeaders rejected");
+        elen = build_pe(evil, 0);
+        size_t esec = eopt + 240;
+        put32(evil, esec + 16, 0x20);        /* raw_size */
+        put32(evil, esec + 20, 0xFFFFFFF0u); /* raw_ptr: 合計が巻き戻る */
+        check(pe_parse(evil, elen, &info) == -3,
+              "wrapping section range rejected");
+        elen = build_pe(evil, 0);
+        put32(evil, 0x3C, 0xFFFFFFF8u); /* e_lfanew + 24 が巻き戻る */
+        check(pe_parse(evil, elen, &info) != 0,
+              "wrapping e_lfanew rejected");
+        /* 細工していないものは引き続き受理する。 */
+        elen = build_pe(evil, 0);
+        check(pe_parse(evil, elen, &info) == 0,
+              "clean PE still parses after crafted cases");
+    }
+
     /* ---- 振り分け ---- */
     len = build_pe(pe, 0);
     check(pe_parse(pe, len, &info) == 0, "PE re-parsed for dispatch");

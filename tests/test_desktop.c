@@ -686,6 +686,79 @@ int main(void) {
             memcpy(bad, bmp_buf, 54);
             bad[28] = 32; /* 32 bpp: not supported */
             CHECK(wallpaper_parse(bad, 54, &img) != 0);
+            /* Crafted dimensions (pentest F3 regression): a huge
+             * width must not wrap the stride and be accepted. */
+            {
+                uint8_t hdr[58];
+                memset(hdr, 0, sizeof(hdr));
+                hdr[0] = 'B';
+                hdr[1] = 'M';
+                hdr[10] = 54;  /* data offset */
+                hdr[14] = 40;  /* header size */
+                hdr[26] = 1;   /* planes */
+                hdr[28] = 24;  /* bpp */
+                hdr[22] = 1;   /* height 1 */
+                /* width = 0x55555556 (stride wrapped to 4 pre-fix) */
+                hdr[18] = 0x56;
+                hdr[19] = 0x55;
+                hdr[20] = 0x55;
+                hdr[21] = 0x55;
+                CHECK(wallpaper_parse(hdr, sizeof(hdr), &img) != 0);
+                /* width = 0x40000001 (int stride overflow pre-fix) */
+                hdr[18] = 0x01;
+                hdr[19] = 0x00;
+                hdr[20] = 0x00;
+                hdr[21] = 0x40;
+                CHECK(wallpaper_parse(hdr, sizeof(hdr), &img) != 0);
+                /* width = 100 needs 54 + 304 = 358 bytes, not 58 */
+                hdr[18] = 100;
+                hdr[19] = 0;
+                hdr[20] = 0;
+                hdr[21] = 0;
+                CHECK(wallpaper_parse(hdr, sizeof(hdr), &img) != 0);
+            }
+            /* A small valid BMP still parses, including top-down. */
+            {
+                static uint8_t tiny[70];
+                memset(tiny, 0, sizeof(tiny));
+                tiny[0] = 'B';
+                tiny[1] = 'M';
+                tiny[10] = 54;
+                tiny[14] = 40;
+                tiny[26] = 1;
+                tiny[28] = 24;
+                tiny[18] = 2; /* width */
+                tiny[22] = 2; /* height */
+                CHECK(wallpaper_parse(tiny, sizeof(tiny), &img) == 0);
+                CHECK(img.width == 2 && img.height == 2 &&
+                      img.stride == 8 && img.top_down == 0);
+                /* height = -2: top-down */
+                tiny[22] = 0xFE;
+                tiny[23] = 0xFF;
+                tiny[24] = 0xFF;
+                tiny[25] = 0xFF;
+                CHECK(wallpaper_parse(tiny, sizeof(tiny), &img) == 0);
+                CHECK(img.height == 2 && img.top_down == 1);
+            }
+            /* Dimension cap boundary: 8192 parses, 8193 is rejected
+             * even when the file is long enough. */
+            {
+                static uint8_t wide[24640];
+                memset(wide, 0, sizeof(wide));
+                wide[0] = 'B';
+                wide[1] = 'M';
+                wide[10] = 54;
+                wide[14] = 40;
+                wide[26] = 1;
+                wide[28] = 24;
+                wide[22] = 1; /* height 1 */
+                wide[18] = 0x00;
+                wide[19] = 0x20; /* width 8192 */
+                CHECK(wallpaper_parse(wide, 54 + 24576, &img) == 0);
+                CHECK(img.width == 8192 && img.stride == 24576);
+                wide[18] = 0x01; /* width 8193 */
+                CHECK(wallpaper_parse(wide, 54 + 24580, &img) != 0);
+            }
             /* Draw the image scaled onto the fake framebuffer and
              * check two pixels against the BMP bytes directly. */
             CHECK(wallpaper_parse(bmp_buf, (size_t)bmp_len, &img) == 0);

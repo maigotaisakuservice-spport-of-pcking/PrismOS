@@ -291,6 +291,14 @@ int zip_read_entry(const uint8_t *data, size_t len,
         return -1;
     }
     if (entry->method == 0) {
+        /* 格納 (stored) では comp_size と uncomp_size は必ず一致し、
+         * どちらも出力先 cap に収まらなければならない。一致しない
+         * 細工項目 (uncomp だけ小さい等) が cap を超えて書き込む
+         * のを防ぐ (ペンテスト F1)。 */
+        if (entry->comp_size != entry->uncomp_size ||
+            entry->comp_size > cap) {
+            return -1;
+        }
         memcpy(out, data + data_off, entry->comp_size);
         if (zip_crc32(out, entry->comp_size) != entry->crc) {
             return -1;
