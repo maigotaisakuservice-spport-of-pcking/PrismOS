@@ -36,7 +36,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xorriso mtools qemu-system-x86 \
             qemu-system-arm gcc-aarch64-linux-gnu
-          pip install cryptography
+          # CVE-2026-133949: pip 26.2.2 未満は侵害された eMudhra 証明書を
+          # 信頼する。cryptography の取得前に pip 自体を更新する。
+          python3 -m pip install --upgrade "pip>=26.2.2"
+          python3 -m pip install cryptography
       - name: Host unit tests
         run: make test
       - name: No SSE/FP instructions in kernel
